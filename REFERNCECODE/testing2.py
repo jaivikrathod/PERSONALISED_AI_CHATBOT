@@ -3,6 +3,8 @@ import pickle
 from sentence_transformers import SentenceTransformer, util
 from google import genai
 
+API_KEY = "AQ.Ab8RN6JJr4CH2wlFVVH7rWbCL1jC0a2eH8AGv-QH6CZXckdEcQ"
+CONFIDENCE_THRESHOLD = 0.40
 
 
 client = genai.Client(
