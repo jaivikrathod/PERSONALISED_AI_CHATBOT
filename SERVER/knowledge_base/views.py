@@ -13,12 +13,28 @@ from .models import KnowledgeBase, QuestionAnswer
 from .permissions import CanEditKnowledgeBase
 from .serializers import (
     BulkUploadSerializer,
+    FaqSerializer,
     KnowledgeBaseSerializer,
     QuestionAnswerSerializer,
     SearchSerializer,
 )
 from .services import BulkUploadService, SearchService
 from .tasks import generate_embeddings_for_kb
+
+
+def _default_knowledge_base(company_id):
+    """Return (creating on first use) a company's catch-all knowledge base.
+
+    The dashboard presents FAQs as one flat list with no notion of KB
+    containers, so every FAQ created there is filed under a single auto-managed
+    "General" knowledge base per company.
+    """
+    kb, _ = KnowledgeBase.objects.get_or_create(
+        company_id=company_id,
+        title="General",
+        defaults={"description": "Default knowledge base for dashboard FAQs."},
+    )
+    return kb
 
 
 @extend_schema(tags=["knowledge-base"])
@@ -100,6 +116,62 @@ class QuestionAnswerViewSet(
         # Kick off embedding generation for the freshly imported rows.
         generate_embeddings_for_kb.delay(kb.id)
 
+        return Response(
+            {"success": True, "imported": len(created)},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+@extend_schema(tags=["knowledge-base"])
+class FaqViewSet(CompanyScopedQuerysetMixin, viewsets.ModelViewSet):
+    """Flat FAQ CRUD backing the dashboard Knowledge Base page.
+
+    Exposes QuestionAnswer rows as simple {id, question, answer} records and
+    auto-files new rows under the company's default knowledge base, so the UI
+    never has to deal with KB containers. Search via ?search=, paginate via
+    ?page=&page_size=.
+    """
+
+    queryset = QuestionAnswer.objects.select_related("knowledge_base").all()
+    serializer_class = FaqSerializer
+    permission_classes = [IsAuthenticated, CanEditKnowledgeBase]
+    company_field = "knowledge_base__company"
+    search_fields = ["question", "answer"]
+
+    def perform_create(self, serializer):
+        kb = _default_knowledge_base(self.request.user.company_id)
+        serializer.save(knowledge_base=kb)
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="bulk-upload",
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def bulk_upload(self, request):
+        """Import a CSV/Excel of question,answer rows into the default KB."""
+        upload = request.FILES.get("file")
+        if upload is None:
+            return Response(
+                {"success": False, "message": "No file provided."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not upload.name.lower().endswith((".csv", ".xlsx", ".xls")):
+            return Response(
+                {"success": False, "message": "Only CSV or Excel files are accepted."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        kb = _default_knowledge_base(request.user.company_id)
+        try:
+            created = BulkUploadService(kb).ingest(upload, upload.name)
+        except ValueError as exc:
+            return Response(
+                {"success": False, "message": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        generate_embeddings_for_kb.delay(kb.id)
         return Response(
             {"success": True, "imported": len(created)},
             status=status.HTTP_201_CREATED,

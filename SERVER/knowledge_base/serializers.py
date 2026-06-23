@@ -39,6 +39,19 @@ class QuestionAnswerSerializer(serializers.ModelSerializer):
         read_only_fields = ["uuid", "embedding_status", "created_at", "updated_at"]
 
 
+class FaqSerializer(serializers.ModelSerializer):
+    """Flat FAQ representation for the dashboard.
+
+    Hides the parent KnowledgeBase entirely and exposes the integer ``id`` the
+    frontend uses for row keys and edit/delete URLs.
+    """
+
+    class Meta:
+        model = QuestionAnswer
+        fields = ["id", "question", "answer", "embedding_status", "created_at", "updated_at"]
+        read_only_fields = ["id", "embedding_status", "created_at", "updated_at"]
+
+
 class BulkUploadSerializer(serializers.Serializer):
     knowledge_base = serializers.SlugRelatedField(
         slug_field="uuid", queryset=KnowledgeBase.objects.all()

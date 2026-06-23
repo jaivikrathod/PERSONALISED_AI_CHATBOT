@@ -14,11 +14,18 @@ from drf_spectacular.views import (
     SpectacularRedocView,
     SpectacularSwaggerView,
 )
+from rest_framework.routers import SimpleRouter
+
+from knowledge_base.views import FaqViewSet
 
 
 def health(_request):
     return JsonResponse({"status": "ok"})
 
+
+# Flat FAQ endpoint consumed by the dashboard: /api/v1/knowledge-base/
+faq_router = SimpleRouter()
+faq_router.register("knowledge-base", FaqViewSet, basename="faq")
 
 api_v1 = [
     path("accounts/", include("accounts.urls")),
@@ -29,6 +36,7 @@ api_v1 = [
     path("agents/", include("agents.urls")),
     path("analytics/", include("analytics.urls")),
     path("integrations/", include("integrations.urls")),
+    *faq_router.urls,
 ]
 
 urlpatterns = [
