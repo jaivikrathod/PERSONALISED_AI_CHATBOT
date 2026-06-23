@@ -1,0 +1,42 @@
+[
+    {
+        "question": "How can I reset my password?",
+        "answer": "Click on 'Forgot Password' on the login page and follow the instructions sent to your email."
+    },
+    {
+        "question": "How can I change my email address?",
+        "answer": "Go to Account Settings → Profile and update your email address."
+    },
+    {
+        "question": "How can I contact support?",
+        "answer": "You can contact support via support@example.com or through the Help Center."
+    },
+    {
+        "question": "What payment methods do you accept?",
+        "answer": "We accept Visa, Mastercard, American Express, UPI, and Net Banking."
+    },
+    {
+        "question": "How do I cancel my subscription?",
+        "answer": "Navigate to Billing Settings and click 'Cancel Subscription'."
+    },
+    {
+        "question": "Can I get a refund?",
+        "answer": "Refund requests can be submitted within 30 days of purchase."
+    },
+    {
+        "question": "How can I update my profile?",
+        "answer": "Open Profile Settings and edit your personal information."
+    },
+    {
+        "question": "Why am I not receiving verification emails?",
+        "answer": "Check your spam folder and ensure your email address is entered correctly."
+    },
+    {
+        "question": "How do I change my password?",
+        "answer": "Go to Security Settings and select 'Change Password'."
+    },
+    {
+        "question": "How can I delete my account?",
+        "answer": "Please contact support to request permanent account deletion."
+    }
+]

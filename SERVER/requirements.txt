@@ -1,0 +1,43 @@
+# ----------------------------------------------------------------------------
+# AI Customer Support Platform — Backend dependencies
+# Python 3.12+ recommended (works on 3.11). Pin exact versions in production.
+# ----------------------------------------------------------------------------
+
+# Core
+Django>=5.0,<5.3
+djangorestframework>=3.15
+django-filter>=24.0
+django-cors-headers>=4.4
+
+# Auth (JWT)
+djangorestframework-simplejwt>=5.3
+
+# Database / pgvector
+psycopg2-binary>=2.9
+pgvector>=0.3
+
+# Realtime (Channels)
+channels>=4.1
+channels-redis>=4.2
+daphne>=4.1
+
+# Background tasks
+celery>=5.4
+redis>=5.0
+
+# LLM / Embedding providers
+openai>=1.40
+google-generativeai>=0.7
+
+# Bulk upload parsing
+pandas>=2.2
+openpyxl>=3.1
+
+# Image handling (company logos)
+Pillow>=10.4
+
+# API documentation (OpenAPI / Swagger)
+drf-spectacular>=0.27
+
+# Config
+python-dotenv>=1.0
