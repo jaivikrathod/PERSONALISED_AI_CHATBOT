@@ -26,6 +26,9 @@ celery>=5.4
 redis>=5.0
 
 # LLM / Embedding providers
+# Local, key-free embeddings via all-MiniLM-L6-v2 (default stack).
+sentence-transformers>=3.0
+# Optional cloud providers (only needed if you switch EMBEDDING/LLM_PROVIDER).
 openai>=1.40
 google-generativeai>=0.7
 

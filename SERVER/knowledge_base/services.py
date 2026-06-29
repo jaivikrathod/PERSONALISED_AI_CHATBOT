@@ -49,6 +49,46 @@ class EmbeddingService:
             embedding_status=QuestionAnswer.EMBEDDING_FAILED
         )
 
+    def embed_queryset(self, qa_queryset, batch_size: int = 128) -> dict:
+        """Embed many QA rows synchronously, in batches. Idempotent.
+
+        Powers the dashboard "Convert to Vector DB" button — no Celery/Redis
+        required. ``qa_queryset`` must ``select_related('knowledge_base')`` so we
+        can read ``company_id`` without extra queries. Returns a summary dict.
+        """
+        qas = list(qa_queryset)
+        summary = {"total": len(qas), "embedded": 0, "failed": 0}
+        model_name = getattr(self.provider, "model", "")
+
+        for start in range(0, len(qas), batch_size):
+            batch = qas[start : start + batch_size]
+            try:
+                vectors = self.provider.embed_documents([qa.question for qa in batch])
+            except Exception:  # noqa: BLE001 - mark this batch failed, keep going
+                logger.exception("Batch embedding failed for %d rows", len(batch))
+                QuestionAnswer.objects.filter(pk__in=[qa.pk for qa in batch]).update(
+                    embedding_status=QuestionAnswer.EMBEDDING_FAILED
+                )
+                summary["failed"] += len(batch)
+                continue
+
+            with transaction.atomic():
+                for qa, vector in zip(batch, vectors):
+                    QuestionEmbedding.objects.update_or_create(
+                        qa=qa,
+                        defaults={
+                            "company_id": qa.knowledge_base.company_id,
+                            "embedding": vector,
+                            "model_name": model_name,
+                        },
+                    )
+                QuestionAnswer.objects.filter(pk__in=[qa.pk for qa in batch]).update(
+                    embedding_status=QuestionAnswer.EMBEDDING_READY
+                )
+            summary["embedded"] += len(batch)
+
+        return summary
+
 
 class SearchService:
     """Tenant-scoped retrieval over a company's knowledge base."""

@@ -44,6 +44,22 @@ const knowledgeBaseService = {
     )
     return data
   },
+
+  // Counts of FAQs by embedding state: { total, ready, pending, failed }.
+  embeddingStatus: async () => {
+    const { data } = await axiosInstance.get('/knowledge-base/embedding-status/')
+    return data
+  },
+
+  // Convert FAQs into vector embeddings (all-MiniLM-L6-v2). Synchronous.
+  // rebuild=true re-embeds every FAQ; otherwise only pending/failed rows.
+  generateEmbeddings: async ({ rebuild = false } = {}) => {
+    const { data } = await axiosInstance.post(
+      '/knowledge-base/generate-embeddings/',
+      { rebuild },
+    )
+    return data // { success, total, embedded, failed }
+  },
 }
 
 export default knowledgeBaseService

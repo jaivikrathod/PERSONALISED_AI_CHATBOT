@@ -7,6 +7,9 @@ from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
+from django.db.models import Count
+
+from core.exceptions import ProviderError
 from core.mixins import CompanyCreateMixin, CompanyScopedQuerysetMixin
 
 from .models import KnowledgeBase, QuestionAnswer
@@ -18,8 +21,32 @@ from .serializers import (
     QuestionAnswerSerializer,
     SearchSerializer,
 )
-from .services import BulkUploadService, SearchService
+import logging
+
+from .services import BulkUploadService, EmbeddingService, SearchService
 from .tasks import generate_embeddings_for_kb
+
+logger = logging.getLogger(__name__)
+
+
+def _safe_enqueue_kb(kb_id):
+    """Best-effort embedding enqueue; never let a down broker break the upload.
+
+    No-op unless EMBED_QA_ON_SAVE is set (a Celery worker is running). Otherwise
+    imported rows stay PENDING for the "Convert to Vector DB" button.
+    """
+    from django.conf import settings
+
+    if not settings.EMBED_QA_ON_SAVE:
+        return
+    try:
+        generate_embeddings_for_kb.delay(kb_id)
+    except Exception:  # noqa: BLE001 - broker down: rows stay PENDING for the button
+        logger.warning(
+            "Could not enqueue embeddings for KB %s (broker unavailable); "
+            "rows stay PENDING until 'Convert to Vector DB' is run.",
+            kb_id,
+        )
 
 
 def _default_knowledge_base(company_id):
@@ -114,7 +141,7 @@ class QuestionAnswerViewSet(
             )
 
         # Kick off embedding generation for the freshly imported rows.
-        generate_embeddings_for_kb.delay(kb.id)
+        _safe_enqueue_kb(kb.id)
 
         return Response(
             {"success": True, "imported": len(created)},
@@ -141,6 +168,57 @@ class FaqViewSet(CompanyScopedQuerysetMixin, viewsets.ModelViewSet):
     def perform_create(self, serializer):
         kb = _default_knowledge_base(self.request.user.company_id)
         serializer.save(knowledge_base=kb)
+
+    def _company_qa(self, company_id):
+        """All of a company's live FAQ rows (across its knowledge bases)."""
+        return QuestionAnswer.objects.select_related("knowledge_base").filter(
+            knowledge_base__company_id=company_id,
+            is_deleted=False,
+            knowledge_base__is_deleted=False,
+        )
+
+    @action(detail=False, methods=["get"], url_path="embedding-status")
+    def embedding_status(self, request):
+        """Counts of FAQs by embedding state — drives the button's readiness UI."""
+        counts = dict(
+            self._company_qa(request.user.company_id)
+            .values_list("embedding_status")
+            .annotate(n=Count("id"))
+        )
+        pending = counts.get(QuestionAnswer.EMBEDDING_PENDING, 0)
+        ready = counts.get(QuestionAnswer.EMBEDDING_READY, 0)
+        failed = counts.get(QuestionAnswer.EMBEDDING_FAILED, 0)
+        return Response(
+            {
+                "success": True,
+                "total": pending + ready + failed,
+                "ready": ready,
+                "pending": pending,
+                "failed": failed,
+            }
+        )
+
+    @action(detail=False, methods=["post"], url_path="generate-embeddings")
+    def generate_embeddings(self, request):
+        """Convert FAQs into vector embeddings with all-MiniLM-L6-v2 (synchronous).
+
+        By default only un-embedded (pending/failed) rows are processed; pass
+        ``{"rebuild": true}`` to re-embed every FAQ from scratch.
+        """
+        rebuild = bool(request.data.get("rebuild"))
+        qs = self._company_qa(request.user.company_id)
+        if not rebuild:
+            qs = qs.exclude(embedding_status=QuestionAnswer.EMBEDDING_READY)
+
+        try:
+            summary = EmbeddingService().embed_queryset(qs)
+        except ProviderError as exc:
+            return Response(
+                {"success": False, "message": str(exc)},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response({"success": True, **summary})
 
     @action(
         detail=False,
@@ -171,7 +249,7 @@ class FaqViewSet(CompanyScopedQuerysetMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        generate_embeddings_for_kb.delay(kb.id)
+        _safe_enqueue_kb(kb.id)
         return Response(
             {"success": True, "imported": len(created)},
             status=status.HTTP_201_CREATED,

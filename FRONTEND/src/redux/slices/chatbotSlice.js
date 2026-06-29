@@ -58,7 +58,7 @@ const chatbotSlice = createSlice({
       })
       .addCase(fetchChatbots.fulfilled, (state, { payload }) => {
         state.status = 'succeeded'
-        state.items = payload
+        state.items = (payload || []).filter(Boolean)
       })
       .addCase(fetchChatbots.rejected, (state, { payload }) => {
         state.status = 'failed'
@@ -69,7 +69,7 @@ const chatbotSlice = createSlice({
       })
       .addCase(createChatbot.fulfilled, (state, { payload }) => {
         state.mutating = false
-        state.items.unshift(payload)
+        if (payload) state.items.unshift(payload)
       })
       .addCase(createChatbot.rejected, (state, { payload }) => {
         state.mutating = false

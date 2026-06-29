@@ -58,6 +58,28 @@ export const bulkUploadFaqs = createAsyncThunk(
   },
 )
 
+export const fetchEmbeddingStatus = createAsyncThunk(
+  'kb/embeddingStatus',
+  async (_, { rejectWithValue }) => {
+    try {
+      return await knowledgeBaseService.embeddingStatus()
+    } catch (err) {
+      return rejectWithValue(normalizeError(err).message)
+    }
+  },
+)
+
+export const generateEmbeddings = createAsyncThunk(
+  'kb/generateEmbeddings',
+  async (opts, { rejectWithValue }) => {
+    try {
+      return await knowledgeBaseService.generateEmbeddings(opts)
+    } catch (err) {
+      return rejectWithValue(normalizeError(err).message)
+    }
+  },
+)
+
 // Normalize either a paginated DRF response or a plain array.
 function normalizeList(payload) {
   if (Array.isArray(payload)) return { items: payload, count: payload.length }
@@ -75,6 +97,8 @@ const kbSlice = createSlice({
     status: 'idle',
     mutating: false,
     error: null,
+    embedding: { total: 0, ready: 0, pending: 0, failed: 0 },
+    embeddingRunning: false,
   },
   reducers: {
     setKbPage(state, { payload }) {
@@ -120,6 +144,23 @@ const kbSlice = createSlice({
       .addCase(deleteFaq.fulfilled, (state, { payload: id }) => {
         state.items = state.items.filter((i) => i.id !== id)
         state.count = Math.max(0, state.count - 1)
+      })
+      .addCase(fetchEmbeddingStatus.fulfilled, (state, { payload }) => {
+        state.embedding = {
+          total: payload.total || 0,
+          ready: payload.ready || 0,
+          pending: payload.pending || 0,
+          failed: payload.failed || 0,
+        }
+      })
+      .addCase(generateEmbeddings.pending, (state) => {
+        state.embeddingRunning = true
+      })
+      .addCase(generateEmbeddings.fulfilled, (state) => {
+        state.embeddingRunning = false
+      })
+      .addCase(generateEmbeddings.rejected, (state) => {
+        state.embeddingRunning = false
       })
   },
 })

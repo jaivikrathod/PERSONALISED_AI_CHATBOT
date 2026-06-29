@@ -29,6 +29,6 @@ class ChatbotTests(APITestCase):
     def test_rotate_token_changes_value(self):
         bot = Chatbot.objects.create(company=self.company, name="Bot")
         old = bot.widget_token
-        resp = self.client.post(f"/api/v1/chatbot/chatbots/{bot.uuid}/rotate_token/")
+        resp = self.client.post(f"/api/v1/chatbot/chatbots/{bot.id}/rotate_token/")
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         self.assertNotEqual(resp.data["widget_token"], old)

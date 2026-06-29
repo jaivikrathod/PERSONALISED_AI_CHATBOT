@@ -43,7 +43,8 @@ export default function ChatbotsPage() {
   }, [dispatch])
 
   const usingMock = status !== 'loading' && items.length === 0
-  const bots = usingMock ? mockChatbots : items
+  // Guard against any null/malformed entries so the grid can never crash.
+  const bots = (usingMock ? mockChatbots : items).filter(Boolean)
 
   const confirmDelete = async () => {
     setRemoving(true)
@@ -92,7 +93,7 @@ export default function ChatbotsPage() {
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {bots.map((bot) => (
-            <div key={bot.id} className="card-base flex flex-col p-5 transition hover:shadow-card-hover">
+            <div key={bot.id ?? bot.uuid} className="card-base flex flex-col p-5 transition hover:shadow-card-hover">
               <div className="flex items-start justify-between">
                 <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-brand-500 to-violet-600 text-white shadow-sm">
                   <CpuChipIcon className="h-6 w-6" />

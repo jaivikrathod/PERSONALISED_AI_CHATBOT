@@ -14,11 +14,13 @@ from core.exceptions import ProviderError
 from .base import BaseEmbeddingProvider, BaseLLMProvider
 
 _EMBEDDING_PROVIDERS = {
+    "minilm": "core.ai.local_provider.MiniLMEmbeddingProvider",
     "openai": "core.ai.openai_provider.OpenAIEmbeddingProvider",
     "gemini": "core.ai.gemini_provider.GeminiEmbeddingProvider",
 }
 
 _LLM_PROVIDERS = {
+    "local": "core.ai.local_provider.LocalLLMProvider",
     "openai": "core.ai.openai_provider.OpenAILLMProvider",
     "gemini": "core.ai.gemini_provider.GeminiLLMProvider",
 }

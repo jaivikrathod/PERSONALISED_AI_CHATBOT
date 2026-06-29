@@ -22,12 +22,12 @@ class ChatbotViewSet(
     serializer_class = ChatbotSerializer
     permission_classes = [IsAuthenticated, HasCompanyRole]
     allowed_roles = [UserRole.COMPANY_ADMIN, UserRole.MANAGER]
-    lookup_field = "uuid"
+    # id-based detail routes, consistent with the rest of the dashboard.
     filterset_fields = ["active"]
     search_fields = ["name"]
 
     @action(detail=True, methods=["post"])
-    def rotate_token(self, request, uuid=None):
+    def rotate_token(self, request, pk=None):
         """Invalidate the current widget token and issue a fresh one."""
         bot = self.get_object()
         token = bot.rotate_widget_token()

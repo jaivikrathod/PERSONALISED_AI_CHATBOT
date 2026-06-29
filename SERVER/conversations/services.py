@@ -141,7 +141,9 @@ class ChatService:
         history = self._recent_history()
         history.append(ChatMessage(role="user", content=question))
 
-        result = get_llm_provider().chat(system=system, messages=history)
+        # `sources` lets the key-free LocalLLMProvider echo the best FAQ answer;
+        # API-backed providers (OpenAI/Gemini) accept and ignore it.
+        result = get_llm_provider().chat(system=system, messages=history, sources=sources)
         return result.content.strip()
 
     def _recent_history(self) -> list[ChatMessage]:

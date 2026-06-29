@@ -197,6 +197,18 @@ CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TIMEZONE = "UTC"
 CELERY_TASK_TRACK_STARTED = True
 
+# Fail fast when the broker (Redis) is down instead of blocking the web request
+# with a long retry loop. Embedding is optional on save — the "Convert to Vector
+# DB" button does it synchronously — so a missing worker must never stall FAQ
+# creation. The enqueue call is also wrapped in try/except at the call sites.
+CELERY_TASK_IGNORE_RESULT = True
+CELERY_TASK_PUBLISH_RETRY = False
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = False
+CELERY_BROKER_TRANSPORT_OPTIONS = {
+    "socket_connect_timeout": 1,
+    "socket_timeout": 1,
+}
+
 # ---------------------------------------------------------------------------
 # CORS
 # ---------------------------------------------------------------------------
@@ -206,9 +218,20 @@ CORS_ALLOW_CREDENTIALS = True
 # ---------------------------------------------------------------------------
 # LLM / Embedding providers (consumed by the abstraction layer)
 # ---------------------------------------------------------------------------
-EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "openai")
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai")
-EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "1536"))
+# Defaults to the fully-local, key-free stack: all-MiniLM-L6-v2 embeddings
+# (384-dim) + an extractive LLM that returns the best-matching FAQ answer.
+# Set EMBEDDING_PROVIDER/LLM_PROVIDER to openai|gemini (with a key) to switch.
+EMBEDDING_PROVIDER = os.getenv("EMBEDDING_PROVIDER", "minilm")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "local")
+EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "384"))
+
+# Sentence-Transformers model used by the local (minilm) embedding provider.
+EMBEDDING_MODEL_NAME = os.getenv("EMBEDDING_MODEL_NAME", "all-MiniLM-L6-v2")
+
+# When True, every saved/imported FAQ is auto-queued for embedding on Celery.
+# Default False: embedding is button-driven ("Convert to Vector DB"), so FAQ
+# creation never depends on Redis/Celery. Turn on only if a worker is running.
+EMBED_QA_ON_SAVE = env_bool("EMBED_QA_ON_SAVE", False)
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_EMBEDDING_MODEL = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
@@ -218,7 +241,9 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_EMBEDDING_MODEL = os.getenv("GEMINI_EMBEDDING_MODEL", "text-embedding-004")
 GEMINI_CHAT_MODEL = os.getenv("GEMINI_CHAT_MODEL", "gemini-1.5-flash")
 
-CHAT_CONFIDENCE_THRESHOLD = float(os.getenv("CHAT_CONFIDENCE_THRESHOLD", "0.75"))
+# Cosine-similarity floor for a confident bot answer. Tuned for MiniLM, whose
+# paraphrase scores sit lower than OpenAI's (matches the reference's 0.50).
+CHAT_CONFIDENCE_THRESHOLD = float(os.getenv("CHAT_CONFIDENCE_THRESHOLD", "0.5"))
 CHAT_TOP_K = int(os.getenv("CHAT_TOP_K", "3"))
 
 # ---------------------------------------------------------------------------

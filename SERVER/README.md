@@ -150,18 +150,38 @@ Supports messages, typing indicators (`{"action":"typing"}`) and read receipts
 
 ---
 
-## Switching AI providers
+## AI providers
 
-Set in `.env`:
+The platform ships **local-first** and works with **zero API keys**:
+
+```
+EMBEDDING_PROVIDER=minilm     # all-MiniLM-L6-v2, runs on CPU, 384-dim
+LLM_PROVIDER=local            # extractive: returns the best-matching FAQ answer
+EMBEDDING_DIM=384
+EMBEDDING_MODEL_NAME=all-MiniLM-L6-v2
+```
+
+`minilm` downloads the Sentence-Transformers model once (cached under
+`~/.cache/huggingface`) and embeds entirely offline thereafter. The `local` LLM
+echoes the top retrieved answer — swap to a generative provider for phrasing:
 
 ```
 EMBEDDING_PROVIDER=gemini     # or openai
 LLM_PROVIDER=gemini
-EMBEDDING_DIM=768             # must match the model: openai=1536, gemini=768
+EMBEDDING_DIM=768             # must match the model: openai=1536, gemini=768, minilm=384
 ```
 
 Add a new provider by subclassing `BaseEmbeddingProvider` / `BaseLLMProvider`
 in `core/ai/` and registering it in `core/ai/factory.py` — nothing else changes.
+
+### Generating embeddings ("Convert to Vector DB")
+
+FAQs are stored first, then vectorized on demand. The dashboard's **Convert to
+Vector DB** button calls `POST /api/v1/knowledge-base/generate-embeddings/`,
+which embeds all pending FAQs **synchronously** (no Celery/Redis required) and
+flips each row's `embedding_status` to `READY`. `GET …/embedding-status/`
+returns `{total, ready, pending, failed}` for the readiness indicator. (Celery
+auto-embedding on save still runs if a worker is up.)
 
 > Changing `EMBEDDING_DIM` changes the pgvector column width — regenerate the
 > migration and re-embed existing questions.
