@@ -27,6 +27,10 @@ class User(models.Model):
     name = models.CharField(max_length=255)
     email = models.EmailField(unique=True)
 
+    # Hashed password (never stored in plain text). Set via
+    # `user.set_password(raw)` / checked via `user.check_password(raw)`.
+    password = models.CharField(max_length=255)
+
     gender = models.CharField(max_length=10, choices=Gender.choices)
     dob = models.DateField()
 
@@ -53,3 +57,16 @@ class User(models.Model):
     def __str__(self):
         # Readable representation used in the admin, shell and logs.
         return f"{self.name} <{self.email}>"
+
+    # --- Password helpers ---------------------------------------------------
+    # Django's PBKDF2 hashing is reused so we never store plain-text passwords,
+    # even though this is a standalone model (not django.contrib.auth.User).
+    def set_password(self, raw_password):
+        from django.contrib.auth.hashers import make_password
+
+        self.password = make_password(raw_password)
+
+    def check_password(self, raw_password):
+        from django.contrib.auth.hashers import check_password
+
+        return check_password(raw_password, self.password)

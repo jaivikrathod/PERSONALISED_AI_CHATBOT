@@ -1,36 +1,47 @@
-import axiosInstance from './axiosInstance'
+import api from './axiosInstance'
+import { USER_TYPES } from '../utils/constants'
 
 /**
- * Auth endpoints (Django backend: accounts app mounted at /api/v1/accounts/).
- *   POST /accounts/auth/login/          -> { access, refresh, user }
- *   POST /accounts/auth/token/refresh/  -> { access }
- *   GET  /accounts/users/me/            -> { success, user }
+ * Auth + registration API calls.
  *
- * NOTE: the backend exposes no logout endpoint (no token-blacklist view is
- * wired up), so logout() is a client-side-only token clear.
+ * Registration is a two-step flow against the existing CRUD endpoints:
+ *   1. POST /companies/  -> create the company
+ *   2. POST /users/      -> create the Admin user for that company
  */
-const authService = {
-  login: async (credentials) => {
-    const { data } = await axiosInstance.post('/accounts/auth/login/', credentials)
+export const authService = {
+  /** Create a company. Returns the created company (with `id`). */
+  async createCompany(company) {
+    const { data } = await api.post('/companies/', company)
     return data
   },
 
-  refresh: async (refresh) => {
-    const { data } = await axiosInstance.post('/accounts/auth/token/refresh/', {
-      refresh,
+  /** Create an Admin user tied to a company. */
+  async createAdminUser(user) {
+    const { data } = await api.post('/users/', {
+      ...user,
+      type: USER_TYPES.ADMIN,
     })
     return data
   },
 
-  me: async () => {
-    const { data } = await axiosInstance.get('/accounts/users/me/')
-    // backend wraps the user in { success, user }
-    return data.user ?? data
+  /**
+   * Full registration: create the company, then its admin user.
+   * If user creation fails we surface the error (the company will already
+   * exist — acceptable for this demo flow).
+   */
+  async register({ company, admin }) {
+    const createdCompany = await this.createCompany(company)
+    const createdAdmin = await this.createAdminUser({
+      ...admin,
+      company: createdCompany.id,
+    })
+    return { company: createdCompany, admin: createdAdmin }
   },
 
-  logout: async () => {
-    // No server-side logout/blacklist endpoint exists on the backend; the
-    // caller clears local tokens. Kept as a no-op for API symmetry.
+  /** Log in with email + password. Returns the user profile. */
+  async login(credentials) {
+    const { data } = await api.post('/auth/login/', credentials)
+    return data
   },
 }
 

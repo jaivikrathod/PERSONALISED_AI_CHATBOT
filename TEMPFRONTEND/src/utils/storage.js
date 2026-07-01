@@ -1,54 +1,23 @@
 import { STORAGE_KEYS } from './constants'
 
-// Thin, safe localStorage wrapper used by auth + theme.
-
-export const storage = {
-  get(key) {
+/**
+ * Persists the logged-in user in localStorage. There is no JWT in this app —
+ * the backend login endpoint returns the user profile which we store to gate
+ * the UI. Swap this for token storage when real auth is added.
+ */
+export const userStore = {
+  get() {
     try {
-      return localStorage.getItem(key)
+      const raw = localStorage.getItem(STORAGE_KEYS.USER)
+      return raw ? JSON.parse(raw) : null
     } catch {
       return null
     }
   },
-  set(key, value) {
-    try {
-      localStorage.setItem(key, value)
-    } catch {
-      /* ignore quota / private-mode errors */
-    }
+  set(user) {
+    localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(user))
   },
-  remove(key) {
-    try {
-      localStorage.removeItem(key)
-    } catch {
-      /* noop */
-    }
-  },
-  getJSON(key) {
-    const raw = this.get(key)
-    if (!raw) return null
-    try {
-      return JSON.parse(raw)
-    } catch {
-      return null
-    }
-  },
-  setJSON(key, value) {
-    this.set(key, JSON.stringify(value))
-  },
-}
-
-// Auth token helpers (used by axios interceptors & authSlice)
-export const tokenStore = {
-  getAccess: () => storage.get(STORAGE_KEYS.ACCESS_TOKEN),
-  getRefresh: () => storage.get(STORAGE_KEYS.REFRESH_TOKEN),
-  setTokens: ({ access, refresh }) => {
-    if (access) storage.set(STORAGE_KEYS.ACCESS_TOKEN, access)
-    if (refresh) storage.set(STORAGE_KEYS.REFRESH_TOKEN, refresh)
-  },
-  clear: () => {
-    storage.remove(STORAGE_KEYS.ACCESS_TOKEN)
-    storage.remove(STORAGE_KEYS.REFRESH_TOKEN)
-    storage.remove(STORAGE_KEYS.USER)
+  clear() {
+    localStorage.removeItem(STORAGE_KEYS.USER)
   },
 }

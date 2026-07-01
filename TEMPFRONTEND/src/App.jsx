@@ -1,30 +1,49 @@
-import { useEffect } from 'react'
-import { BrowserRouter } from 'react-router-dom'
-import { Provider } from 'react-redux'
-import store from './redux/store'
-import AppRoutes from './routes/AppRoutes'
-import Toaster from './components/ui/Toaster'
-import useTheme from './hooks/useTheme'
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { AuthProvider, useAuth } from './context/AuthContext'
+import ProtectedRoute from './components/ProtectedRoute'
+import RegisterPage from './pages/RegisterPage'
+import LoginPage from './pages/LoginPage'
+import DashboardPage from './pages/DashboardPage'
 
-/** Applies the persisted theme to <html> once on mount. */
-function ThemeBootstrap() {
-  useTheme()
-  return null
+/** Sends already-authenticated users straight to the dashboard. */
+function GuestOnly({ children }) {
+  const { isAuthenticated } = useAuth()
+  return isAuthenticated ? <Navigate to="/dashboard" replace /> : children
 }
 
 export default function App() {
-  // Smooth color transitions when toggling dark mode
-  useEffect(() => {
-    document.documentElement.style.colorScheme = ''
-  }, [])
-
   return (
-    <Provider store={store}>
-      <ThemeBootstrap />
+    <AuthProvider>
       <BrowserRouter>
-        <AppRoutes />
+        <Routes>
+          <Route
+            path="/register"
+            element={
+              <GuestOnly>
+                <RegisterPage />
+              </GuestOnly>
+            }
+          />
+          <Route
+            path="/login"
+            element={
+              <GuestOnly>
+                <LoginPage />
+              </GuestOnly>
+            }
+          />
+          <Route
+            path="/dashboard"
+            element={
+              <ProtectedRoute>
+                <DashboardPage />
+              </ProtectedRoute>
+            }
+          />
+          {/* Default + unknown routes -> register (start of the flow). */}
+          <Route path="*" element={<Navigate to="/register" replace />} />
+        </Routes>
       </BrowserRouter>
-      <Toaster />
-    </Provider>
+    </AuthProvider>
   )
 }
