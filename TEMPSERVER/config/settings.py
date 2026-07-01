@@ -47,6 +47,8 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'company',
     'users',
+    'questions',
+    'vector_question',
     'rest_framework'
 ]
 
