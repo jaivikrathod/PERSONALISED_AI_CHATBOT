@@ -6,11 +6,8 @@ from company.models import Company
 class Question(models.Model):
     """A question/answer pair that belongs to a Company."""
 
-    # `id` is added automatically by Django; declared explicitly to match spec.
     id = models.AutoField(primary_key=True)
 
-    # FK stored in the DB column `company_id`. CASCADE removes questions when
-    # their company is deleted. related_name lets us do `company.questions.all()`.
     company = models.ForeignKey(
         Company,
         on_delete=models.CASCADE,
@@ -24,10 +21,11 @@ class Question(models.Model):
     is_archived = models.BooleanField(default=False)
 
     # --- Vectorization state ------------------------------------------------
-    # Whether this Q/A pair has been embedded and stored in the vector DB.
-    # New rows default to False; vector_id is populated once stored.
+    # `is_vectorized` says whether the embedding has been generated.
+    # `embedding` stores the vector itself (a list of floats) right here on the
+    # row, so there is no separate vector store to keep in sync.
     is_vectorized = models.BooleanField(default=False)
-    vector_id = models.CharField(max_length=255, blank=True, null=True)
+    embedding = models.JSONField(blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -37,21 +35,16 @@ class Question(models.Model):
         ordering = ("-created_at",)
 
     def __str__(self):
-        # Return the first 50 characters of the question for readable display.
         return self.question[:50]
 
-    # --- Custom persistence behaviour --------------------------------------
     def save(self, *args, **kwargs):
-        """Invalidate the vector whenever question/answer content changes.
+        """Reset the embedding whenever the question/answer text changes.
 
-        On update, if the `question` or `answer` text differs from what is
-        stored in the DB, the previously computed embedding is stale, so we
-        reset `is_vectorized=False` and clear `vector_id`. Changes to
-        unrelated fields (e.g. is_archived) leave the vector state intact.
-        New objects keep the model defaults (False / None).
+        If the content changed, the stored embedding is stale, so we clear it
+        and mark the row as needing re-vectorization. Editing unrelated fields
+        (e.g. is_archived) leaves the embedding untouched.
         """
         if self.pk:
-            # Compare only the content fields against the persisted row.
             previous = (
                 Question.objects.filter(pk=self.pk)
                 .values("question", "answer")
@@ -62,28 +55,11 @@ class Question(models.Model):
                 or previous["answer"] != self.answer
             ):
                 self.is_vectorized = False
-                self.vector_id = None
-                # Ensure the reset is persisted even on partial saves.
-                if "update_fields" in kwargs and kwargs["update_fields"] is not None:
+                self.embedding = None
+                if kwargs.get("update_fields") is not None:
                     kwargs["update_fields"] = set(kwargs["update_fields"]) | {
                         "is_vectorized",
-                        "vector_id",
+                        "embedding",
                     }
 
         super().save(*args, **kwargs)
-
-    def delete(self, *args, **kwargs):
-        """Remove the associated vector (if any) before deleting the row."""
-        self._cleanup_vector()
-        return super().delete(*args, **kwargs)
-
-    def _cleanup_vector(self):
-        """Best-effort removal of this question's vector from the vector DB.
-
-        Imported lazily to avoid a circular import between `questions` and
-        `vector_question` at module load time.
-        """
-        if self.vector_id:
-            from vector_question.services import delete_vector
-
-            delete_vector(self.vector_id)

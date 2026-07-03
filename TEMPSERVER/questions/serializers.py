@@ -25,7 +25,7 @@ class QuestionSerializer(serializers.ModelSerializer):
             "answer",
             "is_archived",
             "is_vectorized",
-            "vector_id",
+            "embedding",
             "created_at",
             "updated_at",
         ]
@@ -33,7 +33,7 @@ class QuestionSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "id",
             "is_vectorized",
-            "vector_id",
+            "embedding",
             "created_at",
             "updated_at",
         ]
