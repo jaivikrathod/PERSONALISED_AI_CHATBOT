@@ -4,11 +4,12 @@ import ProtectedRoute from './components/ProtectedRoute'
 import RegisterPage from './pages/RegisterPage'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
+import ChatbotPage from './pages/ChatbotPage'
 
 /** Sends already-authenticated users straight to the dashboard. */
 function GuestOnly({ children }) {
   const { isAuthenticated } = useAuth()
-  return isAuthenticated ? <Navigate to="/dashboard" replace /> : children
+  return isAuthenticated ? <Navigate to="/manage_questions" replace /> : children
 }
 
 export default function App() {
@@ -33,10 +34,18 @@ export default function App() {
             }
           />
           <Route
-            path="/dashboard"
+            path="/manage_questions"
             element={
               <ProtectedRoute>
                 <DashboardPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/chatbot"
+            element={
+              <ProtectedRoute>
+                <ChatbotPage />
               </ProtectedRoute>
             }
           />

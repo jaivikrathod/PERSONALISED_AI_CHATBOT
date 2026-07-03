@@ -3,6 +3,13 @@
 export const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api'
 
+// WebSocket origin for the chatbot socket. Derived from the API base URL by
+// swapping the scheme (http->ws / https->wss) and dropping the /api suffix,
+// so it tracks the API host without a second env var in most setups.
+export const WS_BASE_URL =
+  import.meta.env.VITE_WS_BASE_URL ||
+  API_BASE_URL.replace(/^http/, 'ws').replace(/\/api\/?$/, '')
+
 // localStorage keys
 export const STORAGE_KEYS = {
   USER: 've_user',

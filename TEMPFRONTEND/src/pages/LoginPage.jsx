@@ -29,7 +29,7 @@ export default function LoginPage() {
     try {
       const user = await authService.login(values)
       login(user)
-      navigate('/dashboard', { replace: true })
+      navigate('/manage_questions', { replace: true })
     } catch (err) {
       setServerError(err.message || 'Login failed.')
     }

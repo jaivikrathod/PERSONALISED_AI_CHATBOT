@@ -39,6 +39,10 @@ ALLOWED_HOSTS = []
 # Application definition
 
 INSTALLED_APPS = [
+    # `daphne` must come first: it swaps in the ASGI-aware runserver so the
+    # WebSocket routing below is served in development.
+    'daphne',
+    'channels',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -83,6 +87,17 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'config.wsgi.application'
+
+# Channels drives the WebSocket side of the app (the chatbot socket).
+ASGI_APPLICATION = 'config.asgi.application'
+
+# In-memory channel layer is fine for single-process dev. Swap for Redis
+# (channels_redis) when running multiple workers in production.
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer",
+    },
+}
 
 # CORS — allow the Vite dev server (frontend) to call this API.
 CORS_ALLOWED_ORIGINS = [
