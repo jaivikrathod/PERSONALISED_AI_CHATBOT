@@ -34,14 +34,33 @@ class VectorStore(ABC):
         raise NotImplementedError
 
 
-class MockEmbeddingProvider(EmbeddingProvider):
-    DIMENSIONS = 8
+class SentenceTransformerEmbeddingProvider(EmbeddingProvider):
+    """Real semantic embeddings via sentence-transformers (all-MiniLM-L6-v2).
+
+    The model is loaded once per process and cached on the class — loading is
+    expensive (a few seconds) but encoding after that is fast on CPU.
+    """
+
+    MODEL_NAME = "all-MiniLM-L6-v2"
+    _model = None
+
+    @classmethod
+    def _get_model(cls):
+        if cls._model is None:
+            from sentence_transformers import SentenceTransformer
+
+            cls._model = SentenceTransformer(cls.MODEL_NAME)
+        return cls._model
 
     def embed(self, text: str) -> list[float]:
         if not text or not text.strip():
             raise EmbeddingError("Cannot embed empty text.")
-        seed = sum(bytes(text, "utf-8"))
-        return [round(((seed + i) % 100) / 100, 4) for i in range(self.DIMENSIONS)]
+        vector = self._get_model().encode(
+            text,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        )
+        return vector.tolist()
 
 
 class MockVectorStore(VectorStore):
@@ -58,7 +77,7 @@ class MockVectorStore(VectorStore):
 
 
 def get_embedding_provider() -> EmbeddingProvider:
-    return MockEmbeddingProvider()
+    return SentenceTransformerEmbeddingProvider()
 
 
 def get_vector_store() -> VectorStore:

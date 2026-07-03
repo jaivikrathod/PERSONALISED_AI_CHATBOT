@@ -70,13 +70,14 @@ class ChatConsumer(AsyncWebsocketConsumer):
             )
             return
 
-        # Show only the top-most question, per the current requirement.
-        score, question = matches[0]
+        # Show only the top-most question/answer, per the current requirement.
+        score, question, answer = matches[0]
         await self.send(
             json.dumps(
                 {
                     "type": "answer",
                     "question": question,
+                    "answer": answer,
                     "score": round(score, 4),
                 }
             )
@@ -87,7 +88,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def _top_matches(self, message, company_id):
-        """Embed `message` and return the TOP_K (score, question) pairs, best first."""
+        """Embed `message` and return the TOP_K (score, question, answer) tuples, best first."""
         query_embedding = generate_embedding(message)
 
         queryset = Question.objects.filter(is_archived=False, is_vectorized=True)
@@ -95,11 +96,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
             queryset = queryset.filter(company_id=company_id)
 
         scored = []
-        for row in queryset.only("id", "question", "embedding").iterator():
+        for row in queryset.only("id", "question", "answer", "embedding").iterator():
             if not row.embedding:
                 continue
             scored.append(
-                (_cosine_similarity(query_embedding, row.embedding), row.question)
+                (
+                    _cosine_similarity(query_embedding, row.embedding),
+                    row.question,
+                    row.answer,
+                )
             )
 
         scored.sort(key=lambda pair: pair[0], reverse=True)
