@@ -20,3 +20,6 @@ python-dotenv>=1.0
 
 # Embeddings (all-MiniLM-L6-v2, runs locally on CPU)
 sentence-transformers>=2.2
+
+# LLM answer generation (Gemini)
+google-genai>=1.0

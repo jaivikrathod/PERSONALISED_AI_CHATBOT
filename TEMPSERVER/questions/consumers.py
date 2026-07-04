@@ -3,22 +3,24 @@
 Flow for every message a client sends:
   1. Embed the incoming question with the same provider used for the stored Q&A.
   2. Cosine-compare it against the company's vectorized questions.
-  3. Return the single best-matching *question* (the top of the top-3).
+  3. Take the top-K matches. If the best one clears the confidence threshold,
+     hand those FAQ pairs to Gemini and return its grounded answer.
 
-Nothing is stored — this is a read-only similarity lookup for now. RAG,
-fine-tuned answers and live-agent hand-off come later.
+Nothing is stored — this is a read-only retrieval + LLM lookup for now.
 """
 
 import json
 import math
 
+from asgiref.sync import sync_to_async
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
+from django.conf import settings
 
-from vector_question.services import generate_embedding
+from vector_question.services import LLMError, generate_answer, generate_embedding
 from .models import Question
 
-# How many nearest questions to rank before picking the top one.
+# How many nearest questions to rank and feed to the LLM as context.
 TOP_K = 3
 
 
@@ -63,21 +65,47 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 json.dumps(
                     {
                         "type": "answer",
-                        "question": None,
-                        "message": "No matching question found.",
+                        "answer": "No matching question found.",
+                        "sources": [],
                     }
                 )
             )
             return
 
-        # Show only the top-most question, per the current requirement.
-        score, question = matches[0]
+        best_score = matches[0][0]
+
+        # Low confidence: don't call the LLM, just say we couldn't find it.
+        if best_score < settings.CHAT_CONFIDENCE_THRESHOLD:
+            await self.send(
+                json.dumps(
+                    {
+                        "type": "answer",
+                        "answer": "Sorry, I couldn't find a reliable answer in the FAQ database.",
+                        "score": round(best_score, 4),
+                        "sources": [],
+                    }
+                )
+            )
+            return
+
+        # Feed the top-K (question, answer) pairs to Gemini as grounding context.
+        faq_pairs = [(question, answer) for _, question, answer in matches]
+        try:
+            answer = await sync_to_async(generate_answer)(message, faq_pairs)
+        except LLMError as exc:
+            await self._send_error(str(exc))
+            return
+
         await self.send(
             json.dumps(
                 {
                     "type": "answer",
-                    "question": question,
-                    "score": round(score, 4),
+                    "answer": answer,
+                    "score": round(best_score, 4),
+                    "sources": [
+                        {"question": question, "score": round(score, 4)}
+                        for score, question, _ in matches
+                    ],
                 }
             )
         )
@@ -87,7 +115,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def _top_matches(self, message, company_id):
-        """Embed `message` and return the TOP_K (score, question) pairs, best first."""
+        """Embed `message` and return the TOP_K (score, question, answer) tuples, best first."""
         query_embedding = generate_embedding(message)
 
         queryset = Question.objects.filter(is_archived=False, is_vectorized=True)
@@ -95,11 +123,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
             queryset = queryset.filter(company_id=company_id)
 
         scored = []
-        for row in queryset.only("id", "question", "embedding").iterator():
+        for row in queryset.only("id", "question", "answer", "embedding").iterator():
             if not row.embedding:
                 continue
             scored.append(
-                (_cosine_similarity(query_embedding, row.embedding), row.question)
+                (
+                    _cosine_similarity(query_embedding, row.embedding),
+                    row.question,
+                    row.answer,
+                )
             )
 
         scored.sort(key=lambda pair: pair[0], reverse=True)

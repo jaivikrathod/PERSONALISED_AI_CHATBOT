@@ -18,6 +18,10 @@ class EmbeddingError(Exception):
     pass
 
 
+class LLMError(Exception):
+    pass
+
+
 class EmbeddingProvider(ABC):
     @abstractmethod
     def embed(self, text: str) -> list[float]:
@@ -34,14 +38,33 @@ class VectorStore(ABC):
         raise NotImplementedError
 
 
-class MockEmbeddingProvider(EmbeddingProvider):
-    DIMENSIONS = 8
+class SentenceTransformerEmbeddingProvider(EmbeddingProvider):
+    """Real semantic embeddings via sentence-transformers (all-MiniLM-L6-v2).
+
+    The model is loaded once per process and cached on the class — loading is
+    expensive (a few seconds) but encoding after that is fast on CPU.
+    """
+
+    MODEL_NAME = "all-MiniLM-L6-v2"
+    _model = None
+
+    @classmethod
+    def _get_model(cls):
+        if cls._model is None:
+            from sentence_transformers import SentenceTransformer
+
+            cls._model = SentenceTransformer(cls.MODEL_NAME)
+        return cls._model
 
     def embed(self, text: str) -> list[float]:
         if not text or not text.strip():
             raise EmbeddingError("Cannot embed empty text.")
-        seed = sum(bytes(text, "utf-8"))
-        return [round(((seed + i) % 100) / 100, 4) for i in range(self.DIMENSIONS)]
+        vector = self._get_model().encode(
+            text,
+            convert_to_numpy=True,
+            normalize_embeddings=True,
+        )
+        return vector.tolist()
 
 
 class MockVectorStore(VectorStore):
@@ -58,7 +81,7 @@ class MockVectorStore(VectorStore):
 
 
 def get_embedding_provider() -> EmbeddingProvider:
-    return MockEmbeddingProvider()
+    return SentenceTransformerEmbeddingProvider()
 
 
 def get_vector_store() -> VectorStore:
@@ -67,6 +90,59 @@ def get_vector_store() -> VectorStore:
 
 def generate_embedding(text: str) -> list[float]:
     return get_embedding_provider().embed(text)
+
+
+_FAQ_PROMPT = """\
+You are a helpful customer support assistant.
+
+Use ONLY the FAQ information below.
+
+FAQ Knowledge:
+{context}
+
+User Question:
+{question}
+
+Rules:
+1. Answer only from the FAQ knowledge.
+2. Do not make up information.
+3. If the answer is not available in the FAQ knowledge, reply:
+   "Sorry, I could not find that information in our FAQ database."
+4. Keep the answer concise and natural.
+"""
+
+
+def generate_answer(user_question: str, faq_pairs: list[tuple[str, str]]) -> str:
+    """Ask Gemini to answer `user_question` using only the given FAQ pairs.
+
+    `faq_pairs` is a list of (question, answer) tuples (the top matches).
+    Returns the model's answer text. Raises LLMError on any failure.
+    """
+    from django.conf import settings
+    from google import genai
+
+    if not settings.GEMINI_API_KEY:
+        raise LLMError("GEMINI_API_KEY is not configured.")
+
+    context = "".join(
+        f"\nQuestion: {q}\nAnswer: {a}\n" for q, a in faq_pairs
+    )
+    prompt = _FAQ_PROMPT.format(context=context, question=user_question)
+
+    try:
+        client = genai.Client(api_key=settings.GEMINI_API_KEY)
+        response = client.models.generate_content(
+            model=settings.GEMINI_MODEL,
+            contents=prompt,
+        )
+    except Exception as exc:  # network / auth / quota errors
+        logger.exception("Gemini request failed")
+        raise LLMError(f"Error communicating with Gemini: {exc}") from exc
+
+    text = (getattr(response, "text", None) or "").strip()
+    if not text:
+        raise LLMError("Gemini returned an empty response.")
+    return text
 
 
 def save_to_vector_db(embedding: list[float], metadata: dict[str, Any] | None = None) -> str:

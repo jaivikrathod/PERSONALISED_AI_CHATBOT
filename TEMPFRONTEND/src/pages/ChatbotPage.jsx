@@ -55,7 +55,7 @@ export default function ChatbotPage() {
       }
 
       // `question` is the top match; falls back to the server's info message.
-      const text = data.question || data.message || 'No matching question found.'
+      const text = data.answer || data.message || 'No matching question found.'
       pushMessage('bot', text)
     }
 

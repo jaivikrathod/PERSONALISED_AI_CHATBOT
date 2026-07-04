@@ -161,3 +161,12 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+# --- Chatbot / LLM ----------------------------------------------------------
+# The chatbot retrieves the top matching FAQ questions, then asks Gemini to
+# answer using only those as context.
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+# Below this cosine score the best match is treated as "no reliable answer".
+CHAT_CONFIDENCE_THRESHOLD = float(os.getenv("CHAT_CONFIDENCE_THRESHOLD", "0.40"))
