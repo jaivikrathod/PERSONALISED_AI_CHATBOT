@@ -7,4 +7,5 @@ urlpatterns = [
     path("api/", include("users.urls")),
     path("api/", include("questions.urls")),
     path("api/", include("vector_question.urls")),
+    path("api/", include("chat.urls")),
 ]

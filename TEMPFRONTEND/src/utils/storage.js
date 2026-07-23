@@ -21,3 +21,19 @@ export const userStore = {
     localStorage.removeItem(STORAGE_KEYS.USER)
   },
 }
+
+export const chatSessionStore = {
+  get() {
+    try {
+      return localStorage.getItem(STORAGE_KEYS.CHAT_SESSION_ID)
+    } catch {
+      return null
+    }
+  },
+  set(sessionId) {
+    localStorage.setItem(STORAGE_KEYS.CHAT_SESSION_ID, String(sessionId))
+  },
+  clear() {
+    localStorage.removeItem(STORAGE_KEYS.CHAT_SESSION_ID)
+  },
+}

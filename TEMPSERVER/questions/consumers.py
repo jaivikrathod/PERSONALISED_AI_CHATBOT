@@ -1,12 +1,10 @@
 """WebSocket consumer that powers the chatbot.
 
-Flow for every message a client sends:
-  1. Embed the incoming question with the same provider used for the stored Q&A.
-  2. Cosine-compare it against the company's vectorized questions.
-  3. Take the top-K matches. If the best one clears the confidence threshold,
-     hand those FAQ pairs to Gemini and return its grounded answer.
-
-Nothing is stored — this is a read-only retrieval + LLM lookup for now.
+For each user message we:
+  1. Create or reuse a chat session.
+  2. Store the user's message.
+  3. Generate the FAQ-based answer.
+  4. Store the AI response.
 """
 
 import json
@@ -17,15 +15,15 @@ from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.conf import settings
 
+from chat.models import ChatMessage, ChatSession
 from vector_question.services import LLMError, generate_answer, generate_embedding
+
 from .models import Question
 
-# How many nearest questions to rank and feed to the LLM as context.
 TOP_K = 3
 
 
 def _cosine_similarity(a, b):
-    """Cosine similarity of two equal-length vectors; 0.0 when undefined."""
     if not a or not b or len(a) != len(b):
         return 0.0
     dot = sum(x * y for x, y in zip(a, b))
@@ -41,7 +39,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
         await self.accept()
 
     async def disconnect(self, code):
-        # No group membership or state to clean up yet.
         pass
 
     async def receive(self, text_data=None, bytes_data=None):
@@ -53,20 +50,51 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         message = (payload.get("message") or "").strip()
         company_id = payload.get("company_id")
+        session_id = payload.get("session_id")
+        customer_user_id = payload.get("customer_user_id")
+        customer_user_name = (payload.get("customer_user_name") or "").strip()
+        customer_user_email = (payload.get("customer_user_email") or "").strip()
 
         if not message:
             await self._send_error("Message cannot be empty.")
             return
+        if company_id is None:
+            await self._send_error("company_id is required.")
+            return
+
+        session = await self._get_or_create_session(session_id, company_id)
+        await self._store_message(
+            session=session,
+            company_id=company_id,
+            message=message,
+            sent_by_us=False,
+            is_ai=False,
+            customer_user_id=customer_user_id,
+            customer_user_name=customer_user_name,
+            customer_user_email=customer_user_email,
+        )
 
         matches = await self._top_matches(message, company_id)
 
         if not matches:
+            answer = "No matching question found."
+            await self._store_message(
+                session=session,
+                company_id=company_id,
+                message=answer,
+                sent_by_us=True,
+                is_ai=True,
+                customer_user_id=customer_user_id,
+                customer_user_name=customer_user_name,
+                customer_user_email=customer_user_email,
+            )
             await self.send(
                 json.dumps(
                     {
                         "type": "answer",
-                        "answer": "No matching question found.",
+                        "answer": answer,
                         "sources": [],
+                        "session_id": session.id,
                     }
                 )
             )
@@ -74,27 +102,48 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         best_score = matches[0][0]
 
-        # Low confidence: don't call the LLM, just say we couldn't find it.
         if best_score < settings.CHAT_CONFIDENCE_THRESHOLD:
+            answer = "Sorry, I couldn't find a reliable answer in the FAQ database."
+            await self._store_message(
+                session=session,
+                company_id=company_id,
+                message=answer,
+                sent_by_us=True,
+                is_ai=True,
+                customer_user_id=customer_user_id,
+                customer_user_name=customer_user_name,
+                customer_user_email=customer_user_email,
+            )
             await self.send(
                 json.dumps(
                     {
                         "type": "answer",
-                        "answer": "Sorry, I couldn't find a reliable answer in the FAQ database.",
+                        "answer": answer,
                         "score": round(best_score, 4),
                         "sources": [],
+                        "session_id": session.id,
                     }
                 )
             )
             return
 
-        # Feed the top-K (question, answer) pairs to Gemini as grounding context.
         faq_pairs = [(question, answer) for _, question, answer in matches]
         try:
             answer = await sync_to_async(generate_answer)(message, faq_pairs)
         except LLMError as exc:
             await self._send_error(str(exc))
             return
+
+        await self._store_message(
+            session=session,
+            company_id=company_id,
+            message=answer,
+            sent_by_us=True,
+            is_ai=True,
+            customer_user_id=customer_user_id,
+            customer_user_name=customer_user_name,
+            customer_user_email=customer_user_email,
+        )
 
         await self.send(
             json.dumps(
@@ -106,6 +155,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                         {"question": question, "score": round(score, 4)}
                         for score, question, _ in matches
                     ],
+                    "session_id": session.id,
                 }
             )
         )
@@ -114,8 +164,43 @@ class ChatConsumer(AsyncWebsocketConsumer):
         await self.send(json.dumps({"type": "error", "error": error}))
 
     @database_sync_to_async
+    def _get_or_create_session(self, session_id, company_id):
+        if session_id:
+            session = ChatSession.objects.filter(
+                id=session_id,
+                company_id=company_id,
+            ).first()
+            if session:
+                return session
+
+        return ChatSession.objects.create(company_id=company_id)
+
+    @database_sync_to_async
+    def _store_message(
+        self,
+        session,
+        company_id,
+        message,
+        sent_by_us,
+        is_ai,
+        customer_user_id=None,
+        customer_user_name="",
+        customer_user_email="",
+    ):
+        return ChatMessage.objects.create(
+            company_id=company_id,
+            session=session,
+            customer_user_id=customer_user_id if customer_user_id else None,
+            customer_user_name=customer_user_name,
+            customer_user_email=customer_user_email,
+            message=message,
+            sent_by_us=sent_by_us,
+            is_ai=is_ai,
+            message_type=ChatMessage.MessageType.TEXT,
+        )
+
+    @database_sync_to_async
     def _top_matches(self, message, company_id):
-        """Embed `message` and return the TOP_K (score, question, answer) tuples, best first."""
         query_embedding = generate_embedding(message)
 
         queryset = Question.objects.filter(is_archived=False, is_vectorized=True)

@@ -13,6 +13,7 @@ export const WS_BASE_URL =
 // localStorage keys
 export const STORAGE_KEYS = {
   USER: 've_user',
+  CHAT_SESSION_ID: 've_chat_session_id',
 }
 
 // User types supported by the backend `users.User` model.

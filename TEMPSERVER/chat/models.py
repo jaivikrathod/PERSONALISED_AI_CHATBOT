@@ -15,19 +15,26 @@ class ChatSession(models.Model):
         on_delete=models.CASCADE,
         related_name="chat_sessions",
     )
-    agent_required = models.BooleanField(default=False)
-    assigned_agent = models.ForeignKey(
+
+    agent_needed = models.BooleanField(default=False)
+
+    agent = models.ForeignKey(
         User,
         on_delete=models.SET_NULL,
         related_name="assigned_chat_sessions",
-        blank=True,
         null=True,
+        blank=True,
     )
-    closed_at = models.DateTimeField(blank=True, null=True)
+
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
         default=Status.OPEN,
+    )
+
+    closed_at = models.DateTimeField(
+        null=True,
+        blank=True,
     )
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -35,45 +42,79 @@ class ChatSession(models.Model):
 
     class Meta:
         db_table = "chat_session"
-        ordering = ("-created_at",)
+        ordering = ["-created_at"]
 
     def __str__(self):
-        return f"Session #{self.pk} - {self.company.name}"
-
-
+        return f"Session #{self.id}"
+    
+    
 class ChatMessage(models.Model):
-    class SenderType(models.TextChoices):
-        CUSTOMER = "customer", "Customer"
-        BOT = "bot", "Bot"
-        AGENT = "agent", "Agent"
-
     class MessageType(models.TextChoices):
         TEXT = "text", "Text"
         IMAGE = "image", "Image"
         FILE = "file", "File"
         SYSTEM = "system", "System"
 
+    company = models.ForeignKey(
+        Company,
+        on_delete=models.CASCADE,
+        related_name="chat_messages",
+    )
+
     session = models.ForeignKey(
         ChatSession,
         on_delete=models.CASCADE,
         related_name="messages",
     )
-    sender_type = models.CharField(max_length=20, choices=SenderType.choices)
-    sender_id = models.PositiveIntegerField(blank=True, null=True)
+
+    # Customer Details
+    customer_user_id = models.PositiveBigIntegerField(
+        null=True,
+        blank=True,
+    )
+
+    customer_user_name = models.CharField(
+        max_length=255,
+        blank=True,
+    )
+
+    customer_user_email = models.EmailField(
+        blank=True,
+    )
+
+    # Message
+    message = models.TextField(blank=True)
+
+    # Sender Information
+    sent_by_us = models.BooleanField(default=False)
+
+    is_ai = models.BooleanField(default=False)
+
+    this_user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="chat_messages",
+    )
+
     message_type = models.CharField(
         max_length=20,
         choices=MessageType.choices,
         default=MessageType.TEXT,
     )
-    message = models.TextField(blank=True)
-    attachments = models.JSONField(blank=True, null=True)
+
+    attachments = models.JSONField(
+        null=True,
+        blank=True,
+    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = "chat_message"
-        ordering = ("created_at",)
+        ordering = ["created_at"]
 
     def __str__(self):
-        return f"{self.sender_type} message in session #{self.session_id}"
+        return f"Message #{self.id} - Session #{self.session_id}"

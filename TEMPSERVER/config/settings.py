@@ -55,6 +55,7 @@ INSTALLED_APPS = [
     'vector_question',
     'rest_framework',
     'corsheaders',
+    'chat',
 ]
 
 MIDDLEWARE = [

@@ -35,7 +35,7 @@ export default function AppRoutes() {
         </Route>
 
         {/* Protected app shell */}
-        <Route element={<ProtectedRoute />}>
+        <Route element={<PublicRoute />}>
           <Route element={<DashboardLayout />}>
             <Route index element={<Navigate to="/dashboard" replace />} />
             <Route path="/dashboard" element={<DashboardPage />} />
