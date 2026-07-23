@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import User
+from .permissions import IsAdminOrManager
 from .serializers import UserSerializer, LoginSerializer
 
 
@@ -16,10 +17,21 @@ class UserViewSet(viewsets.ModelViewSet):
 
     queryset = User.objects.select_related("company").all()
     serializer_class = UserSerializer
+    permission_classes = [IsAdminOrManager]
 
     # Enable search and ordering query params, e.g.
     #   /api/users/?search=john
     #   /api/users/?ordering=name
+    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    search_fields = ["name", "email"]
+    ordering_fields = ["name", "created_at", "updated_at"]
+    ordering = ["-created_at"]
+
+
+class ManagedUserViewSet(viewsets.ModelViewSet):
+    queryset = User.objects.select_related("company").all()
+    serializer_class = UserSerializer
+    permission_classes = [IsAdminOrManager]
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["name", "email"]
     ordering_fields = ["name", "created_at", "updated_at"]

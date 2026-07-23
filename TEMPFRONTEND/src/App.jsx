@@ -5,6 +5,7 @@ import RegisterPage from './pages/RegisterPage'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
 import ChatbotPage from './pages/ChatbotPage'
+import UsersPage from './pages/UsersPage'
 
 /** Sends already-authenticated users straight to the dashboard. */
 function GuestOnly({ children }) {
@@ -46,6 +47,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <ChatbotPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/users"
+            element={
+              <ProtectedRoute>
+                <UsersPage />
               </ProtectedRoute>
             }
           />

@@ -16,7 +16,7 @@ class User(models.Model):
 
     class Type(models.TextChoices):
         ADMIN = "Admin", "Admin"
-        EMPLOYEE = "Employee", "Employee"
+        AGENT = "Agent", "Agent"
         MANAGER = "Manager", "Manager"
 
     # --- Fields -------------------------------------------------------------

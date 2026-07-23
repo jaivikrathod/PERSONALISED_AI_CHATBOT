@@ -19,7 +19,7 @@ export const STORAGE_KEYS = {
 // User types supported by the backend `users.User` model.
 export const USER_TYPES = {
   ADMIN: 'Admin',
-  EMPLOYEE: 'Employee',
+  AGENT: 'Agent',
   MANAGER: 'Manager',
 }
 
