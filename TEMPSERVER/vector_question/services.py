@@ -113,17 +113,54 @@ Instructions:
 - Do not guess or assume missing details.
 - Do not mention "according to the FAQ" or "the provided context."
 
-If the FAQ does not contain enough information to answer the question, reply exactly:
+Respond with ONLY a JSON object (no markdown, no extra text) in exactly this shape:
+{{"message": "<your reply to the customer>", "is_answer_found": <true or false>}}
 
+Set "is_answer_found" to false when the FAQ does not contain enough information to
+answer the question. In that case set "message" to:
 "Sorry, I could not find that information in our FAQ database."
+Otherwise set "is_answer_found" to true and put your helpful answer in "message".
 """
 
 
-def generate_answer(user_question: str, faq_pairs: list[tuple[str, str]]) -> str:
+def _parse_answer_payload(text: str) -> tuple[str, bool]:
+    """Parse Gemini's JSON reply into (message, is_answer_found).
+
+    Falls back gracefully if the model wraps the JSON in code fences or fails
+    to return valid JSON at all, so a formatting hiccup never crashes a chat.
+    """
+    import json
+    import re
+
+    cleaned = text.strip()
+    # Strip ```json ... ``` / ``` ... ``` fences if the model added them.
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned).strip()
+
+    try:
+        data = json.loads(cleaned)
+        message = (data.get("message") or "").strip()
+        is_answer_found = bool(data.get("is_answer_found"))
+        if message:
+            return message, is_answer_found
+    except (json.JSONDecodeError, AttributeError):
+        logger.warning("Could not parse Gemini JSON response: %r", text)
+
+    # Fallback: treat the raw text as the message and infer the flag from the
+    # known "not found" apology phrase.
+    not_found = "could not find that information" in cleaned.lower()
+    return cleaned, not not_found
+
+
+def generate_answer(
+    user_question: str, faq_pairs: list[tuple[str, str]]
+) -> tuple[str, bool]:
     """Ask Gemini to answer `user_question` using only the given FAQ pairs.
 
     `faq_pairs` is a list of (question, answer) tuples (the top matches).
-    Returns the model's answer text. Raises LLMError on any failure.
+    Returns a (message, is_answer_found) tuple: `is_answer_found` is False when
+    the FAQ context did not contain enough information to answer, so the caller
+    can escalate to a human. Raises LLMError on any failure.
     """
     from django.conf import settings
     from google import genai
@@ -141,6 +178,7 @@ def generate_answer(user_question: str, faq_pairs: list[tuple[str, str]]) -> str
         response = client.models.generate_content(
             model=settings.GEMINI_MODEL,
             contents=prompt,
+            config={"response_mime_type": "application/json"},
         )
     except Exception as exc:  # network / auth / quota errors
         logger.exception("Gemini request failed")
@@ -149,7 +187,7 @@ def generate_answer(user_question: str, faq_pairs: list[tuple[str, str]]) -> str
     text = (getattr(response, "text", None) or "").strip()
     if not text:
         raise LLMError("Gemini returned an empty response.")
-    return text
+    return _parse_answer_payload(text)
 
 
 def save_to_vector_db(embedding: list[float], metadata: dict[str, Any] | None = None) -> str:

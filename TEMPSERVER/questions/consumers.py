@@ -25,6 +25,13 @@ logger = logging.getLogger(__name__)
 
 TOP_K = 3
 
+# Shown to the customer whenever we can't answer from the FAQ and are handing
+# the conversation off to a human agent (session.agent_needed is set too).
+AGENT_HANDOFF_MESSAGE = (
+    "I'm not able to answer that from our FAQ right now. "
+    "Let me connect you with one of our support agents who'll help you shortly."
+)
+
 
 def _cosine_similarity(a, b):
     if not a or not b or len(a) != len(b):
@@ -89,8 +96,9 @@ class ChatConsumer(AsyncWebsocketConsumer):
             )
 
         if not matches:
-            answer = "No matching question found."
+            answer = AGENT_HANDOFF_MESSAGE
             await self._store_unanswered(message, company_id)
+            await self._flag_agent_needed(session)
             await self._store_message(
                 session=session,
                 company_id=company_id,
@@ -106,6 +114,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     {
                         "type": "answer",
                         "answer": answer,
+                        "is_answer_found": False,
+                        "agent_needed": True,
                         "sources": [],
                         "session_id": session.id,
                     }
@@ -119,10 +129,11 @@ class ChatConsumer(AsyncWebsocketConsumer):
             "Confidence threshold: %.4f", settings.CHAT_CONFIDENCE_THRESHOLD
         )
         if best_score < settings.CHAT_CONFIDENCE_THRESHOLD:
-            answer = "Sorry, I couldn't find a reliable answer in the FAQ database."
+            answer = AGENT_HANDOFF_MESSAGE
             # The question isn't reliably covered by our FAQ database — park it
-            # so a human can supply an answer later.
+            # so a human can supply an answer later, and flag for a human agent.
             await self._store_unanswered(message, company_id)
+            await self._flag_agent_needed(session)
             await self._store_message(
                 session=session,
                 company_id=company_id,
@@ -139,6 +150,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
                         "type": "answer",
                         "answer": answer,
                         "score": round(best_score, 4),
+                        "is_answer_found": False,
+                        "agent_needed": True,
                         "sources": [],
                         "session_id": session.id,
                     }
@@ -150,10 +163,21 @@ class ChatConsumer(AsyncWebsocketConsumer):
                
         faq_pairs = [(question, answer) for _, question, answer in matches]
         try:
-            answer = await sync_to_async(generate_answer)(message, faq_pairs)
+            answer, is_answer_found = await sync_to_async(generate_answer)(
+                message, faq_pairs
+            )
         except LLMError as exc:
             await self._send_error(str(exc))
             return
+
+        # Even though a vector match cleared the threshold, the LLM may still
+        # decide the FAQ context can't actually answer the question. Treat that
+        # as unanswered: park it for review, flag the session for a human, and
+        # hand off to an agent instead of showing the model's apology.
+        if not is_answer_found:
+            answer = AGENT_HANDOFF_MESSAGE
+            await self._store_unanswered(message, company_id)
+            await self._flag_agent_needed(session)
 
         await self._store_message(
             session=session,
@@ -172,6 +196,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     "type": "answer",
                     "answer": answer,
                     "score": round(best_score, 4),
+                    "is_answer_found": is_answer_found,
+                    "agent_needed": not is_answer_found,
                     "sources": [
                         {"question": question, "score": round(score, 4)}
                         for score, question, _ in matches
@@ -226,6 +252,12 @@ class ChatConsumer(AsyncWebsocketConsumer):
             company_id=company_id,
             message=message,
         )
+
+    @database_sync_to_async
+    def _flag_agent_needed(self, session):
+        if not session.agent_needed:
+            session.agent_needed = True
+            session.save(update_fields=["agent_needed", "updated_at"])
 
     @database_sync_to_async
     def _top_matches(self, message, company_id):
