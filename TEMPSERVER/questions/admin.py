@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Question
+from .models import Question, UnansweredMessage
 
 
 @admin.register(Question)
@@ -20,3 +20,16 @@ class QuestionAdmin(admin.ModelAdmin):
     def short_question(self, obj):
         # Truncated preview for the changelist.
         return obj.question[:50]
+
+
+@admin.register(UnansweredMessage)
+class UnansweredMessageAdmin(admin.ModelAdmin):
+    list_display = ("id", "short_message", "company", "timestamp")
+    search_fields = ("message",)
+    list_filter = ("company", "timestamp")
+    ordering = ("-timestamp",)
+    readonly_fields = ("timestamp",)
+
+    @admin.display(description="Message")
+    def short_message(self, obj):
+        return obj.message[:50]

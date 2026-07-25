@@ -1,7 +1,7 @@
 from rest_framework import serializers
 
 from company.models import Company
-from .models import Question
+from .models import Question, UnansweredMessage
 
 
 class QuestionSerializer(serializers.ModelSerializer):
@@ -51,3 +51,14 @@ class QuestionSerializer(serializers.ModelSerializer):
         if not value:
             raise serializers.ValidationError("Answer cannot be empty.")
         return value
+
+
+class UnansweredMessageSerializer(serializers.ModelSerializer):
+    """Read-only serializer for the unanswered-messages inbox."""
+
+    company_name = serializers.CharField(source="company.name", read_only=True)
+
+    class Meta:
+        model = UnansweredMessage
+        fields = ["id", "message", "company", "company_name", "timestamp"]
+        read_only_fields = fields

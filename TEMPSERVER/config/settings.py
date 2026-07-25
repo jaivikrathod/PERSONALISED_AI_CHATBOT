@@ -107,6 +107,31 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 
+# Logging — without this, app loggers fall through to the root logger (level
+# WARNING), so logger.info(...) calls are silently dropped. Route everything
+# to the console at INFO in development.
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "simple": {
+            "format": "{levelname} {name} {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "simple",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+}
+
+
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
@@ -170,4 +195,4 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 # Below this cosine score the best match is treated as "no reliable answer".
-CHAT_CONFIDENCE_THRESHOLD = float(os.getenv("CHAT_CONFIDENCE_THRESHOLD", "0.40"))
+CHAT_CONFIDENCE_THRESHOLD = float(os.getenv("CHAT_CONFIDENCE_THRESHOLD", "0.90")) 

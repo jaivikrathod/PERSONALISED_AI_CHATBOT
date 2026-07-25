@@ -13,6 +13,7 @@ import {
 import { useAuth } from '../context/AuthContext'
 import { questionService } from '../services/questionService'
 import { vectorService } from '../services/vectorService'
+import { unansweredService } from '../services/unansweredService'
 
 /**
  * Step 2 (main): add question/answer pairs, then convert them to vectors.
@@ -28,6 +29,11 @@ export default function DashboardPage() {
   const [vectorizing, setVectorizing] = useState(false)
   const [banner, setBanner] = useState(null) // { type: 'success'|'error', text }
 
+  // Unanswered-messages inbox.
+  const [unanswered, setUnanswered] = useState([])
+  const [answerDrafts, setAnswerDrafts] = useState({}) // { [id]: answerText }
+  const [resolvingId, setResolvingId] = useState(null)
+
   // --- Load questions -----------------------------------------------------
   const loadQuestions = useCallback(async () => {
     setLoading(true)
@@ -41,9 +47,23 @@ export default function DashboardPage() {
     }
   }, [companyId])
 
+  // --- Load unanswered messages -------------------------------------------
+  const loadUnanswered = useCallback(async () => {
+    try {
+      const data = await unansweredService.list(companyId)
+      setUnanswered(data)
+    } catch (err) {
+      setBanner({
+        type: 'error',
+        text: err.message || 'Failed to load unanswered messages.',
+      })
+    }
+  }, [companyId])
+
   useEffect(() => {
     loadQuestions()
-  }, [loadQuestions])
+    loadUnanswered()
+  }, [loadQuestions, loadUnanswered])
 
   // --- Add a question -----------------------------------------------------
   const handleAdd = async (e) => {
@@ -92,6 +112,46 @@ export default function DashboardPage() {
       setBanner({ type: 'error', text: err.message || 'Vectorization failed.' })
     } finally {
       setVectorizing(false)
+    }
+  }
+
+  // --- Answer an unanswered message + vectorize ---------------------------
+  const handleResolve = async (id) => {
+    const answer = (answerDrafts[id] || '').trim()
+    if (!answer) return
+    setResolvingId(id)
+    setBanner(null)
+    try {
+      await unansweredService.resolve(id, answer)
+      setAnswerDrafts((d) => {
+        const next = { ...d }
+        delete next[id]
+        return next
+      })
+      setBanner({
+        type: 'success',
+        text: 'Answer added and vectorized. It will now answer similar questions.',
+      })
+      // A new vectorized question was created and the inbox row removed.
+      await Promise.all([loadQuestions(), loadUnanswered()])
+    } catch (err) {
+      setBanner({
+        type: 'error',
+        text:
+          err.response?.data?.error || err.message || 'Failed to save the answer.',
+      })
+    } finally {
+      setResolvingId(null)
+    }
+  }
+
+  // --- Delete an unanswered message without answering ---------------------
+  const handleDeleteUnanswered = async (id) => {
+    try {
+      await unansweredService.remove(id)
+      await loadUnanswered()
+    } catch (err) {
+      setBanner({ type: 'error', text: err.message || 'Failed to delete message.' })
     }
   }
 
@@ -155,6 +215,52 @@ export default function DashboardPage() {
           </form>
         </CardBody>
       </Card>
+
+      {/* Unanswered messages inbox */}
+      {unanswered.length > 0 && (
+        <Card className="mb-6">
+          <CardHeader
+            title={`Unanswered messages (${unanswered.length})`}
+            subtitle="Questions customers asked that weren't in your FAQ database. Add an answer to vectorize it."
+          />
+          <CardBody>
+            <ul className="divide-y divide-gray-100 dark:divide-gray-800">
+              {unanswered.map((m) => (
+                <li key={m.id} className="py-3">
+                  <div className="flex items-start justify-between gap-4">
+                    <p className="font-medium text-gray-900 dark:text-gray-100">
+                      {m.message}
+                    </p>
+                    <button
+                      onClick={() => handleDeleteUnanswered(m.id)}
+                      className="shrink-0 text-sm text-red-600 hover:underline"
+                    >
+                      Delete
+                    </button>
+                  </div>
+                  <div className="mt-2 space-y-2">
+                    <Textarea
+                      rows={2}
+                      value={answerDrafts[m.id] || ''}
+                      onChange={(e) =>
+                        setAnswerDrafts((d) => ({ ...d, [m.id]: e.target.value }))
+                      }
+                      placeholder="Type the answer for this question…"
+                    />
+                    <Button
+                      onClick={() => handleResolve(m.id)}
+                      loading={resolvingId === m.id}
+                      disabled={!(answerDrafts[m.id] || '').trim()}
+                    >
+                      Add answer &amp; vectorize
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </CardBody>
+        </Card>
+      )}
 
       {/* Questions list + vectorize */}
       <Card>

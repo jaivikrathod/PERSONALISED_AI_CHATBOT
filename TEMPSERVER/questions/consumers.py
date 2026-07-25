@@ -8,6 +8,7 @@ For each user message we:
 """
 
 import json
+import logging
 import math
 
 from asgiref.sync import sync_to_async
@@ -18,7 +19,9 @@ from django.conf import settings
 from chat.models import ChatMessage, ChatSession
 from vector_question.services import LLMError, generate_answer, generate_embedding
 
-from .models import Question
+from .models import Question, UnansweredMessage
+
+logger = logging.getLogger(__name__)
 
 TOP_K = 3
 
@@ -42,6 +45,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         pass
 
     async def receive(self, text_data=None, bytes_data=None):
+        logger.info("Received message: %s", text_data)
         try:
             payload = json.loads(text_data or "{}")
         except json.JSONDecodeError:
@@ -76,8 +80,17 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         matches = await self._top_matches(message, company_id)
 
+        for score, question, answer in matches:
+            logger.info(
+                "Vector match | score=%.4f | question=%r | answer=%r",
+                score,
+                question,
+                answer,
+            )
+
         if not matches:
             answer = "No matching question found."
+            await self._store_unanswered(message, company_id)
             await self._store_message(
                 session=session,
                 company_id=company_id,
@@ -101,9 +114,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
             return
 
         best_score = matches[0][0]
-
+        logger.info("Best match score: %.4f", best_score)
+        logger.info(
+            "Confidence threshold: %.4f", settings.CHAT_CONFIDENCE_THRESHOLD
+        )
         if best_score < settings.CHAT_CONFIDENCE_THRESHOLD:
             answer = "Sorry, I couldn't find a reliable answer in the FAQ database."
+            # The question isn't reliably covered by our FAQ database — park it
+            # so a human can supply an answer later.
+            await self._store_unanswered(message, company_id)
             await self._store_message(
                 session=session,
                 company_id=company_id,
@@ -127,6 +146,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             )
             return
 
+        # return
+               
         faq_pairs = [(question, answer) for _, question, answer in matches]
         try:
             answer = await sync_to_async(generate_answer)(message, faq_pairs)
@@ -197,6 +218,13 @@ class ChatConsumer(AsyncWebsocketConsumer):
             sent_by_us=sent_by_us,
             is_ai=is_ai,
             message_type=ChatMessage.MessageType.TEXT,
+        )
+
+    @database_sync_to_async
+    def _store_unanswered(self, message, company_id):
+        return UnansweredMessage.objects.create(
+            company_id=company_id,
+            message=message,
         )
 
     @database_sync_to_async

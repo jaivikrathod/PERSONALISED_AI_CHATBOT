@@ -63,3 +63,31 @@ class Question(models.Model):
                     }
 
         super().save(*args, **kwargs)
+
+
+class UnansweredMessage(models.Model):
+    """A customer message the chatbot could not answer from the FAQ database.
+
+    When the best FAQ match scores below the confidence threshold, the raw
+    customer message is parked here so a human can later supply an answer,
+    which turns it into a real Question and vectorizes it.
+    """
+
+    id = models.AutoField(primary_key=True)
+
+    message = models.TextField()
+
+    company = models.ForeignKey(
+        Company,
+        on_delete=models.CASCADE,
+        related_name="unanswered_messages",
+    )
+
+    timestamp = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "unanswered_messages"
+        ordering = ("-timestamp",)
+
+    def __str__(self):
+        return self.message[:50]
