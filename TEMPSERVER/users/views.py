@@ -37,6 +37,16 @@ class ManagedUserViewSet(viewsets.ModelViewSet):
     ordering_fields = ["name", "created_at", "updated_at"]
     ordering = ["-created_at"]
 
+    def get_queryset(self):
+        """Return only the users of the company given in `?company_id=`."""
+        qs = super().get_queryset()
+
+        company_id = self.request.query_params.get("company_id")
+        if company_id:
+            qs = qs.filter(company_id=company_id)
+
+        return qs
+
 
 class LoginView(APIView):
     """POST /api/auth/login/  -> authenticate a user by email + password.
