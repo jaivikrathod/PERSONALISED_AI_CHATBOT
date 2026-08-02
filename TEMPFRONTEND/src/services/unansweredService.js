@@ -24,6 +24,7 @@ export const unansweredService = {
   /** Dismiss an unanswered message without answering it. */
   async remove(id) {
     await api.delete(`/unanswered-messages/${id}/`)
+    return id
   },
 }
 
