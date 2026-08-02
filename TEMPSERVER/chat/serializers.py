@@ -5,6 +5,7 @@ from .models import ChatMessage, ChatSession
 
 class ChatMessageSerializer(serializers.ModelSerializer):
     role = serializers.SerializerMethodField()
+    sender = serializers.SerializerMethodField()
 
     class Meta:
         model = ChatMessage
@@ -15,15 +16,24 @@ class ChatMessageSerializer(serializers.ModelSerializer):
             "message",
             "sent_by_us",
             "is_ai",
+            "this_user",
+            "customer_user_name",
             "message_type",
             "attachments",
             "created_at",
             "role",
+            "sender",
         ]
         read_only_fields = fields
 
     def get_role(self, obj):
         return "bot" if obj.is_ai or obj.sent_by_us else "user"
+
+    def get_sender(self, obj):
+        """Finer-grained than `role`: the agent console needs ai vs agent."""
+        if obj.is_ai:
+            return "ai"
+        return "agent" if obj.sent_by_us else "customer"
 
 
 class ChatSessionSerializer(serializers.ModelSerializer):
@@ -73,4 +83,6 @@ class ChatSessionListSerializer(serializers.ModelSerializer):
 
     def get_last_message_at(self, obj):
         message = getattr(obj, "last_message_obj", None)
-        return message.created_at if message else None
+        # ISO string rather than a datetime: this payload is also pushed down
+        # the agent socket with plain json.dumps, which can't encode datetimes.
+        return message.created_at.isoformat() if message else None

@@ -17,6 +17,15 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 from django.conf import settings
 
 from chat.models import ChatMessage, ChatSession
+from chat.services import (
+    ACTIVE_SESSION_STATUSES,
+    agent_group,
+    flag_agent_needed,
+    message_event,
+    send_to_group,
+    session_event,
+    session_group,
+)
 from vector_question.services import LLMError, generate_answer, generate_embedding
 
 from .models import Question, UnansweredMessage
@@ -46,10 +55,17 @@ def _cosine_similarity(a, b):
 
 class ChatConsumer(AsyncWebsocketConsumer):
     async def connect(self):
+        # Set once the first message reveals which session this socket belongs
+        # to; used to receive live replies from the assigned human agent.
+        self.session_group_name = None
         await self.accept()
 
     async def disconnect(self, code):
-        pass
+        if self.session_group_name:
+            await self.channel_layer.group_discard(
+                self.session_group_name, self.channel_name
+            )
+            self.session_group_name = None
 
     async def receive(self, text_data=None, bytes_data=None):
         logger.info("Received message: %s", text_data)
@@ -74,7 +90,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
             return
 
         session = await self._get_or_create_session(session_id, company_id)
-        await self._store_message(
+        await self._join_session_group(session.id)
+        stored = await self._store_message(
             session=session,
             company_id=company_id,
             message=message,
@@ -84,6 +101,26 @@ class ChatConsumer(AsyncWebsocketConsumer):
             customer_user_name=customer_user_name,
             customer_user_email=customer_user_email,
         )
+
+        # A human already owns this conversation: hand the message straight to
+        # them and keep the AI out of it.
+        live_agent_id = await self._live_agent_id(session)
+        if live_agent_id:
+            await send_to_group(
+                agent_group(live_agent_id),
+                {"type": "chat.message", "message": message_event(stored)},
+            )
+            await self.send(
+                json.dumps(
+                    {
+                        "type": "delivered",
+                        "session_id": session.id,
+                        "agent_needed": True,
+                        "agent_handling": True,
+                    }
+                )
+            )
+            return
 
         matches = await self._top_matches(message, company_id)
 
@@ -98,7 +135,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         if not matches:
             answer = AGENT_HANDOFF_MESSAGE
             await self._store_unanswered(message, company_id)
-            await self._flag_agent_needed(session)
+            await self._handoff_to_agent(session)
             await self._store_message(
                 session=session,
                 company_id=company_id,
@@ -133,7 +170,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             # The question isn't reliably covered by our FAQ database — park it
             # so a human can supply an answer later, and flag for a human agent.
             await self._store_unanswered(message, company_id)
-            await self._flag_agent_needed(session)
+            await self._handoff_to_agent(session)
             await self._store_message(
                 session=session,
                 company_id=company_id,
@@ -177,7 +214,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
         if not is_answer_found:
             answer = AGENT_HANDOFF_MESSAGE
             await self._store_unanswered(message, company_id)
-            await self._flag_agent_needed(session)
+            await self._handoff_to_agent(session)
+
 
         await self._store_message(
             session=session,
@@ -209,6 +247,55 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     async def _send_error(self, error):
         await self.send(json.dumps({"type": "error", "error": error}))
+
+    async def _join_session_group(self, session_id):
+        """Subscribe this socket to the session so agent replies reach it."""
+        group = session_group(session_id)
+        if self.session_group_name == group:
+            return
+        if self.session_group_name:
+            await self.channel_layer.group_discard(
+                self.session_group_name, self.channel_name
+            )
+        await self.channel_layer.group_add(group, self.channel_name)
+        self.session_group_name = group
+
+    async def _handoff_to_agent(self, session):
+        """Flag the session, assign a free agent and ping their console."""
+        assignment = await self._flag_and_assign(session)
+        if assignment is None:
+            logger.info("Session #%s needs an agent but none are free", session.id)
+            return
+
+        await send_to_group(
+            agent_group(assignment["agent_id"]),
+            {"type": "chat.assigned", "session": assignment["session"]},
+        )
+
+    # --- Group events pushed in by the agent console ------------------------
+    async def chat_message(self, event):
+        """An agent replied — forward it to the customer as a chat bubble."""
+        payload = event["message"]
+        if payload.get("sender") != "agent":
+            return
+        await self.send(
+            json.dumps(
+                {
+                    "type": "agent_message",
+                    "answer": payload["message"],
+                    "session_id": payload["session_id"],
+                    "is_answer_found": True,
+                    "agent_needed": True,
+                    "agent_handling": True,
+                    "sources": [],
+                }
+            )
+        )
+
+    async def chat_closed(self, event):
+        await self.send(
+            json.dumps({"type": "chat_closed", "session_id": event["session_id"]})
+        )
 
     @database_sync_to_async
     def _get_or_create_session(self, session_id, company_id):
@@ -254,10 +341,27 @@ class ChatConsumer(AsyncWebsocketConsumer):
         )
 
     @database_sync_to_async
-    def _flag_agent_needed(self, session):
-        if not session.agent_needed:
-            session.agent_needed = True
-            session.save(update_fields=["agent_needed", "updated_at"])
+    def _live_agent_id(self, session):
+        """Agent id currently handling this session, if the chat is still live."""
+        # Re-read: the agent may have been attached after this socket connected.
+        row = (
+            ChatSession.objects.filter(id=session.id)
+            .values("agent_id", "status")
+            .first()
+        )
+        if row and row["agent_id"] and row["status"] in ACTIVE_SESSION_STATUSES:
+            return row["agent_id"]
+        return None
+
+    @database_sync_to_async
+    def _flag_and_assign(self, session):
+        agent = flag_agent_needed(session)
+        if agent is None:
+            return None
+        return {
+            "agent_id": agent.id,
+            "session": session_event(session, agent_id=agent.id),
+        }
 
     @database_sync_to_async
     def _top_matches(self, message, company_id):

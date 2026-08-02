@@ -4,6 +4,7 @@ import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { Button, Input, Card, CardBody } from '../components/ui'
 import { authService } from '../services/authService'
 import { useAuth } from '../context/AuthContext'
+import { USER_TYPES } from '../utils/constants'
 
 /**
  * Step 2 (entry): log in with the Admin credentials created at registration.
@@ -29,7 +30,10 @@ export default function LoginPage() {
     try {
       const user = await authService.login(values)
       login(user)
-      navigate('/manage_questions', { replace: true })
+      // Agents live in the support console, everyone else in the admin app.
+      navigate(user.type === USER_TYPES.AGENT ? '/agent' : '/manage_questions', {
+        replace: true,
+      })
     } catch (err) {
       setServerError(err.message || 'Login failed.')
     }

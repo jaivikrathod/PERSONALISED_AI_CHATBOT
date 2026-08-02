@@ -19,13 +19,17 @@ django_asgi_app = get_asgi_application()
 
 from channels.routing import ProtocolTypeRouter, URLRouter  # noqa: E402
 
-from questions.routing import websocket_urlpatterns  # noqa: E402
+from chat.routing import websocket_urlpatterns as agent_websocket_urlpatterns  # noqa: E402
+from questions.routing import websocket_urlpatterns as chat_websocket_urlpatterns  # noqa: E402
 
 application = ProtocolTypeRouter(
     {
         # Regular HTTP requests keep going through the standard Django stack.
         "http": django_asgi_app,
-        # WebSocket connections are matched against the chatbot routes.
-        "websocket": URLRouter(websocket_urlpatterns),
+        # WebSocket connections are matched against the customer chatbot routes
+        # first, then the agent-console routes.
+        "websocket": URLRouter(
+            chat_websocket_urlpatterns + agent_websocket_urlpatterns
+        ),
     }
 )

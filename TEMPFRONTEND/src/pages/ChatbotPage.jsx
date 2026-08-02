@@ -19,6 +19,8 @@ export default function ChatbotPage() {
   const [waiting, setWaiting] = useState(false)
   const [loadingSessions, setLoadingSessions] = useState(true)
   const [loadingMessages, setLoadingMessages] = useState(false)
+  // True once a human agent owns the conversation (the AI stops answering).
+  const [agentHandling, setAgentHandling] = useState(false)
 
   const socketRef = useRef(null)
   const scrollRef = useRef(null)
@@ -29,8 +31,8 @@ export default function ChatbotPage() {
     return idRef.current
   }
 
-  const pushMessage = (role, text, isError = false) =>
-    setMessages((prev) => [...prev, { id: nextId(), role, text, isError }])
+  const pushMessage = (role, text, isError = false, sender = null) =>
+    setMessages((prev) => [...prev, { id: nextId(), role, text, isError, sender }])
 
   const refreshSessions = async (preferredSessionId = null) => {
     const data = await chatbotService.listSessions({ companyId, customerUserId })
@@ -58,8 +60,10 @@ export default function ChatbotPage() {
         role: message.role,
         text: message.message,
         isError: false,
+        sender: message.sender === 'agent' ? 'agent' : null,
       }))
       setMessages(restoredMessages)
+      setAgentHandling(Boolean(data.agent) && data.status !== 'closed')
     } finally {
       setLoadingMessages(false)
     }
@@ -114,6 +118,27 @@ export default function ChatbotPage() {
         pushMessage('bot', data.error || 'Something went wrong.', true)
         return
       }
+
+      // The chat has been handed to a human: the server only acknowledges the
+      // delivery, the reply arrives later as an `agent_message`.
+      if (data.type === 'delivered') {
+        setAgentHandling(true)
+        return
+      }
+
+      if (data.type === 'chat_closed') {
+        pushMessage('bot', 'The agent has closed this conversation.', false, 'system')
+        setAgentHandling(false)
+        return
+      }
+
+      if (data.type === 'agent_message') {
+        setAgentHandling(true)
+        pushMessage('bot', data.answer, false, 'agent')
+        return
+      }
+
+      if (data.agent_needed) setAgentHandling(true)
 
       const nextSessionId = data.session_id || activeSessionId
       if (nextSessionId && nextSessionId !== activeSessionId) {
@@ -251,9 +276,11 @@ export default function ChatbotPage() {
                 {activeSession ? `Chat #${activeSession.id}` : 'New Chat'}
               </h2>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                {activeSession?.last_message_at
-                  ? new Date(activeSession.last_message_at).toLocaleString()
-                  : 'Start a new conversation'}
+                {agentHandling
+                  ? 'A support agent is handling this conversation.'
+                  : activeSession?.last_message_at
+                    ? new Date(activeSession.last_message_at).toLocaleString()
+                    : 'Start a new conversation'}
               </p>
             </div>
           </div>
@@ -277,17 +304,24 @@ export default function ChatbotPage() {
 
           {messages.map((message) => (
             <div key={message.id} className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div
-                className={
-                  'max-w-[80%] whitespace-pre-wrap rounded-2xl px-4 py-2 text-sm ' +
-                  (message.role === 'user'
-                    ? 'rounded-br-sm bg-brand-600 text-white'
-                    : message.isError
-                      ? 'rounded-bl-sm bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
-                      : 'rounded-bl-sm bg-white text-gray-800 shadow-sm dark:bg-gray-800 dark:text-gray-100')
-                }
-              >
-                {message.text}
+              <div className="max-w-[80%]">
+                {message.sender === 'agent' && (
+                  <div className="mb-1 text-[11px] text-gray-400">Support agent</div>
+                )}
+                <div
+                  className={
+                    'whitespace-pre-wrap rounded-2xl px-4 py-2 text-sm ' +
+                    (message.role === 'user'
+                      ? 'rounded-br-sm bg-brand-600 text-white'
+                      : message.isError
+                        ? 'rounded-bl-sm bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
+                        : message.sender === 'agent'
+                          ? 'rounded-bl-sm bg-emerald-50 text-emerald-900 shadow-sm dark:bg-emerald-500/10 dark:text-emerald-200'
+                          : 'rounded-bl-sm bg-white text-gray-800 shadow-sm dark:bg-gray-800 dark:text-gray-100')
+                  }
+                >
+                  {message.text}
+                </div>
               </div>
             </div>
           ))}
@@ -296,7 +330,7 @@ export default function ChatbotPage() {
             <div className="flex justify-start">
               <div className="flex items-center gap-2 rounded-2xl rounded-bl-sm bg-white px-4 py-2 text-sm text-gray-500 shadow-sm dark:bg-gray-800 dark:text-gray-400">
                 <Spinner className="h-4 w-4" />
-                Searchingâ€¦
+                {agentHandling ? 'Waiting for the agent…' : 'Searching…'}
               </div>
             </div>
           )}

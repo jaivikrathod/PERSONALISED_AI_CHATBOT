@@ -6,11 +6,15 @@ import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
 import ChatbotPage from './pages/ChatbotPage'
 import UsersPage from './pages/UsersPage'
+import AgentPage from './pages/AgentPage'
+import { USER_TYPES } from './utils/constants'
 
-/** Sends already-authenticated users straight to the dashboard. */
+/** Sends already-authenticated users straight to their landing page. */
 function GuestOnly({ children }) {
-  const { isAuthenticated } = useAuth()
-  return isAuthenticated ? <Navigate to="/manage_questions" replace /> : children
+  const { isAuthenticated, user } = useAuth()
+  if (!isAuthenticated) return children
+  const home = user?.type === USER_TYPES.AGENT ? '/agent' : '/manage_questions'
+  return <Navigate to={home} replace />
 }
 
 export default function App() {
@@ -47,6 +51,14 @@ export default function App() {
             element={
               <ProtectedRoute>
                 <ChatbotPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/agent"
+            element={
+              <ProtectedRoute>
+                <AgentPage />
               </ProtectedRoute>
             }
           />
