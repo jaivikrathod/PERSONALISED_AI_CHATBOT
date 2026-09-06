@@ -7,17 +7,16 @@ from .views import (
     AgentSendMessageView,
     AssignAgentView,
     ChatHistoryView,
-    ChatSessionListView,
     ChatWidgetConfigView,
 )
 
 urlpatterns = [
-    # Public widget (anonymous visitors).
+    # Public widget (anonymous visitors). `history` is guarded by the session's
+    # own public_token rather than by a bearer token.
     path("chat/widget/", ChatWidgetConfigView.as_view(), name="chat-widget-config"),
-    path("chat/sessions/", ChatSessionListView.as_view(), name="chat-sessions"),
     path("chat/history/", ChatHistoryView.as_view(), name="chat-history"),
     path("chat/sessions/assign/", AssignAgentView.as_view(), name="chat-assign-agent"),
-    # Agent-facing routes.
+    # Agent-facing routes. The agent is taken from the token, never the request.
     path("agent/chats/", AgentChatListView.as_view(), name="agent-chats"),
     path("agent/chats/history/", AgentChatHistoryView.as_view(), name="agent-chat-history"),
     path("agent/chats/send/", AgentSendMessageView.as_view(), name="agent-chat-send"),

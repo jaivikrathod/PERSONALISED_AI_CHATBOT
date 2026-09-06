@@ -6,7 +6,7 @@ import { SESSION_STATUS, SOCKET_STATUS } from '../../utils/constants'
  * Human-agent console.
  *
  * The inbox and history load over REST so the console renders even when the
- * socket is down; `ws/agent/?agent_id=` then drives everything live (see
+ * socket is down; `ws/agent/?token=` then drives everything live (see
  * `hooks/useAgentSocket`). Sending falls back to REST when the socket dropped.
  */
 
@@ -24,9 +24,9 @@ export function normalizeMessage(raw) {
 
 export const fetchAgentChats = createAsyncThunk(
   'agentChat/fetchChats',
-  async (agentId, { rejectWithValue }) => {
+  async (_, { rejectWithValue }) => {
     try {
-      return await agentService.listChats(agentId)
+      return await agentService.listChats()
     } catch (err) {
       return rejectWithValue(err.message || 'Failed to load chats.')
     }
@@ -35,9 +35,9 @@ export const fetchAgentChats = createAsyncThunk(
 
 export const fetchAgentHistory = createAsyncThunk(
   'agentChat/fetchHistory',
-  async ({ agentId, sessionId }, { rejectWithValue }) => {
+  async ({ sessionId }, { rejectWithValue }) => {
     try {
-      return await agentService.getHistory({ agentId, sessionId })
+      return await agentService.getHistory({ sessionId })
     } catch (err) {
       return rejectWithValue(err.message || 'Failed to load the conversation.')
     }
@@ -47,9 +47,9 @@ export const fetchAgentHistory = createAsyncThunk(
 /** REST fallback used only when the socket is not open. */
 export const sendAgentMessage = createAsyncThunk(
   'agentChat/sendMessage',
-  async ({ agentId, sessionId, message }, { rejectWithValue }) => {
+  async ({ sessionId, message }, { rejectWithValue }) => {
     try {
-      return await agentService.sendMessage({ agentId, sessionId, message })
+      return await agentService.sendMessage({ sessionId, message })
     } catch (err) {
       return rejectWithValue(err.message || 'Failed to send the message.')
     }
@@ -59,9 +59,9 @@ export const sendAgentMessage = createAsyncThunk(
 /** REST fallback used only when the socket is not open. */
 export const closeAgentChat = createAsyncThunk(
   'agentChat/closeChat',
-  async ({ agentId, sessionId }, { rejectWithValue }) => {
+  async ({ sessionId }, { rejectWithValue }) => {
     try {
-      await agentService.closeChat({ agentId, sessionId })
+      await agentService.closeChat({ sessionId })
       return sessionId
     } catch (err) {
       return rejectWithValue(err.message || 'Failed to close the chat.')

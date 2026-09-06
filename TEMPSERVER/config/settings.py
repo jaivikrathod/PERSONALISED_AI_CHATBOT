@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from datetime import timedelta
 from pathlib import Path
 import os
+import warnings
 
 from dotenv import load_dotenv
 
@@ -92,12 +93,48 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Channels drives the WebSocket side of the app (the chatbot socket).
 ASGI_APPLICATION = 'config.asgi.application'
 
-# In-memory channel layer is fine for single-process dev. Swap for Redis
-# (channels_redis) when running multiple workers in production.
-CHANNEL_LAYERS = {
-    "default": {
-        "BACKEND": "channels.layers.InMemoryChannelLayer",
-    },
+# Channel layer. The in-memory backend keeps groups inside a single process,
+# so agent handoff silently stops working the moment a second worker exists —
+# set REDIS_URL for anything beyond a single-process dev server.
+REDIS_URL = os.getenv("REDIS_URL", "")
+
+if REDIS_URL:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels_redis.core.RedisChannelLayer",
+            "CONFIG": {"hosts": [REDIS_URL]},
+        },
+    }
+else:
+    CHANNEL_LAYERS = {
+        "default": {
+            "BACKEND": "channels.layers.InMemoryChannelLayer",
+        },
+    }
+    warnings.warn(
+        "REDIS_URL is not set - using the in-memory channel layer. Chat "
+        "handoff between the customer widget and the agent console only works "
+        "within one process. Do not deploy this way.",
+        RuntimeWarning,
+        stacklevel=1,
+    )
+
+
+# --- DRF --------------------------------------------------------------------
+# Closed by default: every endpoint requires a bearer token unless it opts out
+# with `permission_classes = [AllowAny]`. The alternative (open by default,
+# lock down individually) is how the previous `?user_type=Admin` check ended up
+# being the only thing standing between the internet and every tenant's data.
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "users.authentication.BearerTokenAuthentication",
+    ],
+    "DEFAULT_PERMISSION_CLASSES": [
+        "users.permissions.IsAuthenticatedUser",
+    ],
+    # We do not use django.contrib.auth, so there is no AnonymousUser to fall
+    # back to; permission classes treat None as "not signed in".
+    "UNAUTHENTICATED_USER": None,
 }
 
 # CORS — allow the Vite dev server (frontend) to call this API.
@@ -194,5 +231,25 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # answer using only those as context.
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-# Below this cosine score the best match is treated as "no reliable answer".
-CHAT_CONFIDENCE_THRESHOLD = float(os.getenv("CHAT_CONFIDENCE_THRESHOLD", "0.90")) 
+# Retrieval floor: below this cosine score the best FAQ match is not even shown
+# to the LLM, and the chat is handed to a human agent.
+#
+# Measured on all-MiniLM-L6-v2 with bare-question index text (the bands are
+# pinned by tests/test_retrieval.py):
+#
+#     exact restatement      1.00
+#     true paraphrase        0.44 - 0.80
+#     unrelated question     0.08 - 0.35
+#
+# The usable separation is a narrow 0.35-0.44 band, and 0.40 sits inside it.
+# This was 0.90 - far above anything the model produces for a paraphrase - so
+# essentially every rephrased question escalated to a human.
+#
+# Treat this as a cheap pre-filter, not the decision: `generate_answer` returns
+# `is_answer_found`, and that second, LLM-side judgement is what decides whether
+# the FAQ context actually answers the question. Erring low here is therefore
+# the safe direction.
+DEFAULT_CHAT_CONFIDENCE_THRESHOLD = 0.40
+CHAT_CONFIDENCE_THRESHOLD = float(
+    os.getenv("CHAT_CONFIDENCE_THRESHOLD", str(DEFAULT_CHAT_CONFIDENCE_THRESHOLD))
+) 

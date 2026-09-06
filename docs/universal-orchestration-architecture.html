@@ -1,0 +1,1257 @@
+<title>Tool-Calling Chatbot Platform</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=JetBrains+Mono:wght@400;500;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&display=swap">
+
+<style>
+  :root {
+    --ground:      #F2F5F3;
+    --surface:     #FFFFFF;
+    --surface-2:   #E8EDEA;
+    --ink:         #151B19;
+    --ink-2:       #3D4845;
+    --muted:       #66736F;
+    --rule:        #CBD5D0;
+    --rule-soft:   #DFE6E2;
+    --accent:      #0E6B5B;
+    --accent-soft: #DCEBE6;
+    --risk:        #A2431A;
+    --risk-soft:   #F6E5DB;
+    --caution:     #7E6210;
+    --caution-soft:#F4EDD6;
+
+    --measure: 70ch;
+    --step--1: 0.8125rem;
+    --step-0:  1.0625rem;
+    --step-1:  1.25rem;
+    --step-2:  1.5rem;
+    --step-3:  2rem;
+    --step-4:  2.75rem;
+
+    --sans: "Archivo", "Helvetica Neue", Arial, sans-serif;
+    --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground:      #0C1211;
+      --surface:     #121A18;
+      --surface-2:   #1A2422;
+      --ink:         #E1E9E6;
+      --ink-2:       #B5C2BE;
+      --muted:       #849691;
+      --rule:        #2B3A36;
+      --rule-soft:   #1F2C29;
+      --accent:      #4FC6A9;
+      --accent-soft: #10312A;
+      --risk:        #E39468;
+      --risk-soft:   #332014;
+      --caution:     #D4B455;
+      --caution-soft:#302713;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ground:      #0C1211;
+    --surface:     #121A18;
+    --surface-2:   #1A2422;
+    --ink:         #E1E9E6;
+    --ink-2:       #B5C2BE;
+    --muted:       #849691;
+    --rule:        #2B3A36;
+    --rule-soft:   #1F2C29;
+    --accent:      #4FC6A9;
+    --accent-soft: #10312A;
+    --risk:        #E39468;
+    --risk-soft:   #332014;
+    --caution:     #D4B455;
+    --caution-soft:#302713;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: var(--step-0);
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection { background: var(--accent-soft); color: var(--ink); }
+
+  a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* ---------- shell ---------- */
+  .shell { display: grid; grid-template-columns: minmax(0, 1fr); }
+
+  @media (min-width: 1240px) {
+    .shell { grid-template-columns: 252px minmax(0, 1fr); }
+    .rail {
+      position: sticky; top: 0; align-self: start;
+      height: 100vh; overflow-y: auto;
+      border-right: 1px solid var(--rule);
+      padding: 2.5rem 1.5rem 3rem;
+    }
+    .rail-mobile { display: none; }
+  }
+  @media (max-width: 1239px) {
+    .rail { display: none; }
+  }
+
+  .rail-title {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 1rem;
+  }
+  .rail ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+  .rail a {
+    display: flex; gap: 0.6rem;
+    font-family: var(--sans);
+    font-size: 0.8125rem;
+    line-height: 1.35;
+    color: var(--ink-2);
+    text-decoration: none;
+  }
+  .rail a:hover { color: var(--accent); }
+  .rail .n { font-family: var(--mono); color: var(--muted); font-size: 0.75rem; }
+
+  .rail-mobile {
+    border-bottom: 1px solid var(--rule);
+    background: var(--surface);
+    padding: 0.75rem 1.25rem;
+  }
+  .rail-mobile summary {
+    font-family: var(--mono); font-size: 0.75rem;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--muted); cursor: pointer;
+  }
+  .rail-mobile ol {
+    list-style: none; margin: 0.85rem 0 0.4rem; padding: 0;
+    display: grid; gap: 0.45rem;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  }
+  .rail-mobile a { font-family: var(--sans); font-size: 0.8125rem; color: var(--ink-2); text-decoration: none; display: flex; gap: 0.5rem; }
+  .rail-mobile .n { font-family: var(--mono); color: var(--muted); }
+
+  /* ---------- flow ---------- */
+  main {
+    display: flex; flex-direction: column; align-items: center;
+    gap: 1.35rem;
+    padding: 3rem 1.25rem 7rem;
+  }
+  main > * { width: 100%; max-width: var(--measure); margin: 0; }
+  main > .wide { max-width: 1120px; }
+
+  /* ---------- masthead ---------- */
+  .masthead { padding-bottom: 0.5rem; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 1.1rem;
+  }
+  h1 {
+    font-family: var(--sans);
+    font-weight: 700;
+    font-size: var(--step-4);
+    line-height: 1.04;
+    letter-spacing: -0.025em;
+    text-wrap: balance;
+    margin: 0 0 0.9rem;
+  }
+  .standfirst {
+    font-size: var(--step-1);
+    line-height: 1.5;
+    color: var(--ink-2);
+    margin: 0 0 1.75rem;
+  }
+  .meta {
+    display: flex; flex-wrap: wrap; gap: 0 2rem;
+    border-top: 1px solid var(--rule);
+    border-bottom: 1px solid var(--rule);
+    padding: 0.9rem 0;
+    font-family: var(--mono);
+    font-size: 0.75rem;
+    color: var(--muted);
+  }
+  .meta b { display: block; color: var(--ink-2); font-weight: 500; letter-spacing: 0.02em; }
+  .meta span { letter-spacing: 0.09em; text-transform: uppercase; font-size: 0.6875rem; }
+
+  /* ---------- headings ---------- */
+  h2 {
+    font-family: var(--sans);
+    font-weight: 700;
+    font-size: var(--step-3);
+    line-height: 1.12;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin: 2.75rem 0 0.35rem;
+    padding-top: 1.5rem;
+    border-top: 2px solid var(--ink);
+    display: flex; gap: 0.85rem; align-items: baseline;
+  }
+  h2 .sec {
+    font-family: var(--mono);
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--accent);
+    letter-spacing: 0.04em;
+    flex: none;
+  }
+  h3 {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: var(--step-1);
+    letter-spacing: -0.01em;
+    line-height: 1.25;
+    margin: 2rem 0 0.15rem;
+    text-wrap: balance;
+  }
+  h4 {
+    font-family: var(--mono);
+    font-weight: 500;
+    font-size: 0.75rem;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 1.5rem 0 0.1rem;
+  }
+  p { margin: 0; }
+  main > p + p, main > .wide + p { margin-top: 0; }
+
+  strong { font-weight: 600; }
+  em { font-style: italic; }
+
+  code {
+    font-family: var(--mono);
+    font-size: 0.845em;
+    background: var(--surface-2);
+    padding: 0.1em 0.34em;
+    border-radius: 2px;
+    word-break: break-word;
+  }
+
+  /* ---------- lists ---------- */
+  ul, ol.numbered { margin: 0; padding-left: 1.15rem; display: flex; flex-direction: column; gap: 0.4rem; }
+  li { padding-left: 0.15rem; }
+  li::marker { color: var(--muted); }
+
+  .tight { gap: 0.25rem; }
+
+  /* ---------- code blocks ---------- */
+  pre {
+    margin: 0;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-left: 2px solid var(--accent);
+    padding: 1rem 1.15rem;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    line-height: 1.65;
+    color: var(--ink-2);
+    tab-size: 2;
+  }
+  pre code { background: none; padding: 0; font-size: inherit; }
+  .pre-label {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--surface-2);
+    border: 1px solid var(--rule);
+    border-bottom: none;
+    padding: 0.4rem 0.9rem;
+    display: inline-block;
+  }
+  .pre-label + pre { border-top-left-radius: 0; }
+
+  /* ---------- tables ---------- */
+  .table-wrap { overflow-x: auto; border: 1px solid var(--rule); background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 560px; }
+  th, td {
+    text-align: left;
+    padding: 0.6rem 0.85rem;
+    border-bottom: 1px solid var(--rule-soft);
+    vertical-align: top;
+    font-size: 0.8125rem;
+    line-height: 1.45;
+  }
+  th {
+    font-family: var(--mono);
+    font-weight: 500;
+    font-size: 0.6875rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--rule);
+    white-space: nowrap;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td.col { font-family: var(--mono); font-size: 0.75rem; color: var(--ink); white-space: nowrap; }
+  td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .tag {
+    font-family: var(--mono); font-size: 0.6875rem;
+    letter-spacing: 0.05em; padding: 0.1rem 0.4rem;
+    border: 1px solid var(--rule); color: var(--ink-2);
+    white-space: nowrap;
+  }
+  .tag.keep { color: var(--accent); border-color: var(--accent); }
+  .tag.new  { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+  .tag.bad  { color: var(--risk); border-color: var(--risk); }
+
+  /* ---------- callouts ---------- */
+  .call {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-top: 3px solid var(--muted);
+    padding: 1rem 1.15rem 1.1rem;
+    display: flex; flex-direction: column; gap: 0.5rem;
+  }
+  .call .lbl {
+    font-family: var(--mono);
+    font-size: 0.6875rem;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .call p, .call ul { font-size: 0.9375rem; }
+  .call.risk { border-top-color: var(--risk); background: var(--risk-soft); }
+  .call.risk .lbl { color: var(--risk); }
+  .call.pick { border-top-color: var(--accent); background: var(--accent-soft); }
+  .call.pick .lbl { color: var(--accent); }
+  .call.note { border-top-color: var(--caution); background: var(--caution-soft); }
+  .call.note .lbl { color: var(--caution); }
+
+  /* ---------- figures ---------- */
+  figure { margin: 0; display: flex; flex-direction: column; gap: 0.7rem; }
+  .fig-frame {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    padding: 1.5rem 1.25rem;
+    overflow-x: auto;
+  }
+  figure svg { display: block; width: 100%; min-width: 620px; height: auto; color: var(--ink-2); }
+  figcaption {
+    font-size: 0.8125rem;
+    color: var(--muted);
+    line-height: 1.5;
+    max-width: 68ch;
+  }
+  figcaption b { color: var(--ink-2); font-weight: 600; }
+
+  .svg-box { fill: none; stroke: currentColor; stroke-width: 1.25; }
+  .svg-box-fill { fill: var(--surface-2); stroke: currentColor; stroke-width: 1.25; }
+  .svg-lbl { font-family: var(--mono); font-size: 11px; fill: var(--ink); }
+  .svg-lbl-sm { font-family: var(--mono); font-size: 9.5px; fill: var(--muted); letter-spacing: 0.04em; }
+  .svg-title { font-family: var(--mono); font-size: 10px; fill: var(--muted); letter-spacing: 0.14em; }
+  .svg-line { stroke: currentColor; stroke-width: 1.25; fill: none; }
+  .svg-accent { stroke: var(--accent); stroke-width: 1.75; fill: none; }
+  .svg-accent-txt { fill: var(--accent); font-family: var(--mono); font-size: 10px; }
+  .svg-risk { stroke: var(--risk); stroke-width: 1.5; fill: none; }
+  .svg-risk-txt { fill: var(--risk); font-family: var(--mono); font-size: 10px; }
+  .svg-dash { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 5 4; fill: none; }
+
+  /* ---------- misc ---------- */
+  .divider { border: none; border-top: 1px solid var(--rule); width: 100%; max-width: var(--measure); margin: 1rem auto; }
+  .lede { font-size: 1.125rem; color: var(--ink-2); line-height: 1.55; }
+
+  .qgrid { display: grid; gap: 1px; background: var(--rule); border: 1px solid var(--rule); }
+  @media (min-width: 720px) { .qgrid { grid-template-columns: 1fr 1fr; } }
+  .qcell { background: var(--surface); padding: 1rem 1.1rem; display: flex; flex-direction: column; gap: 0.4rem; }
+  .qcell .qn { font-family: var(--mono); font-size: 0.6875rem; letter-spacing: 0.12em; color: var(--accent); text-transform: uppercase; }
+  .qcell h4 { margin: 0; font-family: var(--sans); font-size: 0.9375rem; text-transform: none; letter-spacing: 0; color: var(--ink); font-weight: 600; }
+  .qcell p { font-size: 0.875rem; color: var(--ink-2); }
+  .qcell .rec { font-size: 0.8125rem; color: var(--accent); font-family: var(--sans); font-weight: 500; }
+
+  footer {
+    width: 100%; max-width: var(--measure);
+    border-top: 2px solid var(--ink);
+    padding-top: 1rem; margin-top: 2rem;
+    font-family: var(--mono); font-size: 0.75rem; color: var(--muted);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { animation: none !important; transition: none !important; }
+  }
+</style>
+
+<div class="shell">
+  <aside class="rail">
+    <p class="rail-title">Contents</p>
+    <ol>
+      <li><a href="#s1"><span class="n">1</span> What breaks today</a></li>
+      <li><a href="#s2"><span class="n">2</span> Target architecture</a></li>
+      <li><a href="#s3"><span class="n">3</span> Data model</a></li>
+      <li><a href="#s4"><span class="n">4</span> Tool registry</a></li>
+      <li><a href="#s5"><span class="n">5</span> Structured search</a></li>
+      <li><a href="#s6"><span class="n">6</span> Knowledge search</a></li>
+      <li><a href="#s7"><span class="n">7</span> Actions</a></li>
+      <li><a href="#s8"><span class="n">8</span> Orchestration loop</a></li>
+      <li><a href="#s9"><span class="n">9</span> Conversation context</a></li>
+      <li><a href="#s10"><span class="n">10</span> Validation &amp; security</a></li>
+      <li><a href="#s11"><span class="n">11</span> Configuration UX</a></li>
+      <li><a href="#s12"><span class="n">12</span> Scaling</a></li>
+      <li><a href="#s13"><span class="n">13</span> Migration plan</a></li>
+      <li><a href="#s14"><span class="n">14</span> Open decisions</a></li>
+    </ol>
+  </aside>
+
+  <div>
+    <details class="rail-mobile">
+      <summary>Contents — 14 sections</summary>
+      <ol>
+        <li><a href="#s1"><span class="n">1</span> What breaks today</a></li>
+        <li><a href="#s2"><span class="n">2</span> Target architecture</a></li>
+        <li><a href="#s3"><span class="n">3</span> Data model</a></li>
+        <li><a href="#s4"><span class="n">4</span> Tool registry</a></li>
+        <li><a href="#s5"><span class="n">5</span> Structured search</a></li>
+        <li><a href="#s6"><span class="n">6</span> Knowledge search</a></li>
+        <li><a href="#s7"><span class="n">7</span> Actions</a></li>
+        <li><a href="#s8"><span class="n">8</span> Orchestration loop</a></li>
+        <li><a href="#s9"><span class="n">9</span> Conversation context</a></li>
+        <li><a href="#s10"><span class="n">10</span> Validation &amp; security</a></li>
+        <li><a href="#s11"><span class="n">11</span> Configuration UX</a></li>
+        <li><a href="#s12"><span class="n">12</span> Scaling</a></li>
+        <li><a href="#s13"><span class="n">13</span> Migration plan</a></li>
+        <li><a href="#s14"><span class="n">14</span> Open decisions</a></li>
+      </ol>
+    </details>
+
+    <main>
+      <header class="masthead">
+        <p class="eyebrow">Architecture proposal · for review</p>
+        <h1>From FAQ Search to a Tool-Calling Platform</h1>
+        <p class="standfirst">Turn the fixed embed&#8209;then&#8209;answer pipeline into an orchestration loop where a per&#8209;tenant tool registry — knowledge, structured data, and actions — is the only thing the model ever sees.</p>
+        <div class="meta">
+          <div><span>Status</span><b>Draft — decisions in §14</b></div>
+          <div><span>Codebase</span><b>TEMPSERVER · Django 5.2 / Channels</b></div>
+          <div><span>Scope</span><b>Backend architecture + schema</b></div>
+        </div>
+      </header>
+
+      <p class="lede">The FAQ pipeline you have is a correct implementation of the wrong shape. It decides <em>before</em> the model runs that this turn needs a vector search, and it can only ever produce one kind of answer. Everything below keeps the retrieval quality work you have already done and moves the decision one level up — to the model, constrained by a registry the backend owns.</p>
+
+      <!-- ============ 1 ============ -->
+      <h2 id="s1"><span class="sec">§1</span> What breaks today</h2>
+
+      <p>Grounded in the current code, not hypotheticals. <code>questions/consumers.py</code> is where the pipeline lives; <code>vector_question/services.py</code> holds embedding and generation.</p>
+
+      <div class="wide">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>#</th><th>Finding</th><th>Where</th><th>Consequence</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="col">F1</td>
+                <td><b>Retrieval is a full table scan in Python.</b> <code>_top_matches</code> iterates every vectorized row and computes cosine in a Python loop over 384 floats.</td>
+                <td class="col">consumers.py</td>
+                <td>~4M interpreted float ops per message at 10k FAQs. No index is possible while <code>embedding</code> is a <code>JSONField</code>.</td>
+              </tr>
+              <tr>
+                <td class="col">F2</td>
+                <td><b>The confidence threshold is almost certainly miscalibrated.</b> <code>CHAT_CONFIDENCE_THRESHOLD</code> defaults to <code>0.90</code>; MiniLM cosine for genuinely related sentence pairs typically lands in 0.45–0.75.</td>
+                <td class="col">settings.py</td>
+                <td>Nearly every question escalates to a human. The bot looks broken and agents get flooded.</td>
+              </tr>
+              <tr>
+                <td class="col">F3</td>
+                <td><b>Index and query text are asymmetric.</b> Rows are embedded as <code>"Question:\n…\n\nAnswer:\n…"</code>; queries are embedded as the bare user sentence.</td>
+                <td class="col">services.py</td>
+                <td>Depresses every score further, compounding F2. Two independent causes of the same symptom.</td>
+              </tr>
+              <tr>
+                <td class="col">F4</td>
+                <td><b>Routing is hardcoded in the transport layer.</b> The consumer decides handoff from a score comparison before any model call.</td>
+                <td class="col">consumers.py</td>
+                <td>A greeting triggers a vector scan and can escalate. There is no place to add a second capability.</td>
+              </tr>
+              <tr>
+                <td class="col">F5</td>
+                <td><b>No conversation history reaches the model.</b> <code>generate_answer(message, faq_pairs)</code> receives one turn.</td>
+                <td class="col">services.py</td>
+                <td>Follow-ups (“and under 80 lakh?”) are structurally impossible to answer.</td>
+              </tr>
+              <tr>
+                <td class="col">F6</td>
+                <td><b>No chatbot entity.</b> Configuration is implicit; the tenant key is <code>company_id</code> and every behaviour is global.</td>
+                <td class="col">schema</td>
+                <td>Nowhere to hang per-bot tools, persona, model, or thresholds.</td>
+              </tr>
+              <tr>
+                <td class="col">F7</td>
+                <td><b>There is no authentication.</b> <code>IsAdminOrManager</code> returns true when the request carries <code>?user_type=Admin</code> in the query string. Login issues no token.</td>
+                <td class="col">users/permissions.py</td>
+                <td><span class="tag bad">Blocker</span> Any browser can read or write any tenant's data by editing a URL.</td>
+              </tr>
+              <tr>
+                <td class="col">F8</td>
+                <td><b><code>InMemoryChannelLayer</code>.</b> Groups exist only inside one process.</td>
+                <td class="col">settings.py</td>
+                <td><span class="tag bad">Blocker</span> Agent handoff silently fails the moment you run more than one worker.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="call risk">
+        <span class="lbl">Fix before anything else</span>
+        <p><b>F7 and F8 are not architecture, they are prerequisites.</b> This design adds configurable outbound HTTP calls and cross-tenant structured data. Shipping either on top of a query-string permission check turns a demo weakness into a data breach. Real session tokens and a Redis channel layer are Phase&nbsp;0, before any of §3 onward.</p>
+      </div>
+
+      <p><b>F2 and F3 are worth fixing this week regardless of this proposal</b> — they are a one-line threshold change and a change to what text gets embedded, and they likely account for most of the current handoff volume.</p>
+
+      <!-- ============ 2 ============ -->
+      <h2 id="s2"><span class="sec">§2</span> Target architecture</h2>
+
+      <p>The change is structural, not additive: retrieval stops being a stage in a pipeline and becomes one of several capabilities the model may invoke. The loop is what is new.</p>
+
+      <figure class="wide">
+        <div class="fig-frame">
+          <svg viewBox="0 0 880 372" role="img" aria-label="Today: message goes through an unconditional vector search and a single model call. Proposed: the orchestrator gives the model a tool registry, and the model may call tools and receive results in a loop before answering.">
+            <defs>
+              <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+              </marker>
+              <marker id="ah-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent)"/>
+              </marker>
+            </defs>
+
+            <!-- ROW A : today -->
+            <text class="svg-title" x="0" y="14">TODAY — FIXED PIPELINE</text>
+            <line class="svg-line" x1="0" y1="24" x2="880" y2="24" opacity="0.25"/>
+
+            <rect class="svg-box" x="0" y="46" width="112" height="42" rx="2"/>
+            <text class="svg-lbl" x="56" y="72" text-anchor="middle">message</text>
+
+            <line class="svg-line" x1="112" y1="67" x2="176" y2="67" marker-end="url(#ah)"/>
+
+            <rect class="svg-box-fill" x="176" y="46" width="142" height="42" rx="2"/>
+            <text class="svg-lbl" x="247" y="66" text-anchor="middle">vector scan</text>
+            <text class="svg-lbl-sm" x="247" y="79" text-anchor="middle">every row, always</text>
+
+            <line class="svg-line" x1="318" y1="67" x2="382" y2="67" marker-end="url(#ah)"/>
+
+            <rect class="svg-box" x="382" y="46" width="120" height="42" rx="2"/>
+            <text class="svg-lbl" x="442" y="66" text-anchor="middle">top 3 FAQ</text>
+            <text class="svg-lbl-sm" x="442" y="79" text-anchor="middle">or handoff</text>
+
+            <line class="svg-line" x1="502" y1="67" x2="566" y2="67" marker-end="url(#ah)"/>
+
+            <rect class="svg-box" x="566" y="46" width="120" height="42" rx="2"/>
+            <text class="svg-lbl" x="626" y="72" text-anchor="middle">model</text>
+
+            <line class="svg-line" x1="686" y1="67" x2="750" y2="67" marker-end="url(#ah)"/>
+
+            <rect class="svg-box" x="750" y="46" width="112" height="42" rx="2"/>
+            <text class="svg-lbl" x="806" y="72" text-anchor="middle">reply</text>
+
+            <text class="svg-risk-txt" x="0" y="116">one pass · one capability · model never chooses</text>
+
+            <!-- ROW B : proposed -->
+            <text class="svg-title" x="0" y="176">PROPOSED — ORCHESTRATION LOOP</text>
+            <line class="svg-line" x1="0" y1="186" x2="880" y2="186" opacity="0.25"/>
+
+            <rect class="svg-box" x="0" y="216" width="112" height="42" rx="2"/>
+            <text class="svg-lbl" x="56" y="242" text-anchor="middle">message</text>
+
+            <line class="svg-line" x1="112" y1="237" x2="176" y2="237" marker-end="url(#ah)"/>
+
+            <rect class="svg-box-fill" x="176" y="208" width="142" height="58" rx="2"/>
+            <text class="svg-lbl" x="247" y="230" text-anchor="middle">orchestrator</text>
+            <text class="svg-lbl-sm" x="247" y="244" text-anchor="middle">loads chatbot +</text>
+            <text class="svg-lbl-sm" x="247" y="256" text-anchor="middle">tool declarations</text>
+
+            <line class="svg-line" x1="318" y1="237" x2="382" y2="237" marker-end="url(#ah)"/>
+
+            <rect class="svg-box" x="382" y="216" width="120" height="42" rx="2"/>
+            <text class="svg-lbl" x="442" y="242" text-anchor="middle">model</text>
+
+            <path class="svg-accent" d="M 502 226 L 566 226" marker-end="url(#ah-a)"/>
+            <text class="svg-accent-txt" x="534" y="218" text-anchor="middle">tool call</text>
+
+            <rect class="svg-box-fill" x="566" y="200" width="140" height="74" rx="2"/>
+            <text class="svg-lbl" x="636" y="220" text-anchor="middle">tool executor</text>
+            <text class="svg-lbl-sm" x="636" y="236" text-anchor="middle">validate → dispatch</text>
+            <line class="svg-line" x1="580" y1="244" x2="692" y2="244" opacity="0.35"/>
+            <text class="svg-lbl-sm" x="636" y="258" text-anchor="middle">knowledge · data · action</text>
+
+            <path class="svg-accent" d="M 566 262 C 520 262 520 249 502 249" marker-end="url(#ah-a)"/>
+            <text class="svg-accent-txt" x="534" y="276" text-anchor="middle">result</text>
+
+            <line class="svg-line" x1="706" y1="237" x2="750" y2="237" marker-end="url(#ah)"/>
+            <rect class="svg-box" x="750" y="216" width="112" height="42" rx="2"/>
+            <text class="svg-lbl" x="806" y="242" text-anchor="middle">reply</text>
+
+            <text class="svg-accent-txt" x="0" y="306">the loop is the difference — the model may call zero, one, or several tools before it answers</text>
+
+            <!-- stores -->
+            <line class="svg-line" x1="600" y1="274" x2="600" y2="300" opacity="0.4"/>
+            <line class="svg-line" x1="636" y1="274" x2="636" y2="300" opacity="0.4"/>
+            <line class="svg-line" x1="672" y1="274" x2="672" y2="300" opacity="0.4"/>
+            <rect class="svg-box" x="556" y="322" width="88" height="30" rx="2" opacity="0.7"/>
+            <text class="svg-lbl-sm" x="600" y="341" text-anchor="middle">pgvector</text>
+            <rect class="svg-box" x="652" y="322" width="88" height="30" rx="2" opacity="0.7"/>
+            <text class="svg-lbl-sm" x="696" y="341" text-anchor="middle">rows / APIs</text>
+            <path class="svg-line" d="M 600 300 L 600 322" opacity="0.4"/>
+            <path class="svg-line" d="M 636 300 L 690 300 L 690 322" opacity="0.4"/>
+            <path class="svg-line" d="M 672 300 L 700 300" opacity="0"/>
+          </svg>
+        </div>
+        <figcaption><b>The loop is the whole proposal.</b> Everything else — the registry, the schema, the validators — exists to make the return arrow safe. Note what does <em>not</em> change: the same Postgres, the same embedding model, the same WebSocket transport.</figcaption>
+      </figure>
+
+      <h3>Five planes</h3>
+
+      <div class="wide">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Plane</th><th>Owns</th><th>New Django app</th></tr></thead>
+            <tbody>
+              <tr><td class="col">Config</td><td>Chatbots, knowledge sources, data sources + field registry, actions, credentials, compiled tool declarations</td><td class="col">registry</td></tr>
+              <tr><td class="col">Orchestration</td><td>Turn lifecycle, context assembly, the model loop, budgets, degradation</td><td class="col">orchestration</td></tr>
+              <tr><td class="col">Capability</td><td>Three executors behind one interface: knowledge, structured, action</td><td class="col">capabilities</td></tr>
+              <tr><td class="col">Data</td><td>pgvector chunks, generic record store, adapter clients</td><td class="col">(within capabilities)</td></tr>
+              <tr><td class="col">Trust</td><td>Tenancy binding, argument validation, egress control, rate limits, execution audit</td><td class="col">(cross-cutting middleware)</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <p>The transport layer (<code>ChatConsumer</code>) keeps only its socket job: accept a frame, resolve the session, hand the turn to the orchestrator, stream the result back. All the branching currently in <code>receive()</code> disappears.</p>
+
+      <!-- ============ 3 ============ -->
+      <h2 id="s3"><span class="sec">§3</span> Data model</h2>
+
+      <p>Five clusters. Existing tables are marked — the migration is additive, and <code>questions</code> survives as an input format rather than the storage format.</p>
+
+      <h3>3.1 Tenancy and configuration</h3>
+
+      <div class="wide">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Table</th><th>Key columns</th><th></th></tr></thead>
+            <tbody>
+              <tr><td class="col">company</td><td>id, name, email, mobile, address</td><td><span class="tag keep">exists</span></td></tr>
+              <tr><td class="col">users</td><td>id, company_id, type, email, password</td><td><span class="tag keep">exists</span></td></tr>
+              <tr><td class="col">chatbots</td><td>id, company_id, <b>slug</b> (public URL key), name, persona_prompt, model, temperature, locale, is_active, <b>policy</b> jsonb</td><td><span class="tag new">new</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <p><code>chatbots.policy</code> holds the per-bot knobs that are global constants today: retrieval floor, accept threshold, max tool calls per turn, handoff rules, row caps. <code>slug</code> replaces the raw company id in the public URL — <code>/chat/acme-support</code> rather than <code>/chat/7</code>, which stops link recipients from enumerating tenants by incrementing an integer.</p>
+
+      <h3>3.2 Knowledge</h3>
+
+      <div class="wide">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Table</th><th>Key columns</th><th></th></tr></thead>
+            <tbody>
+              <tr><td class="col">knowledge_sources</td><td>id, chatbot_id, name, kind (<code>faq</code> | <code>document</code> | <code>url</code> | <code>text</code>), config jsonb, status, last_indexed_at</td><td><span class="tag new">new</span></td></tr>
+              <tr><td class="col">knowledge_documents</td><td>id, source_id, external_ref, title, raw_text, checksum, updated_at</td><td><span class="tag new">new</span></td></tr>
+              <tr><td class="col">knowledge_chunks</td><td>id, chatbot_id, source_id, document_id, ordinal, <b>content</b>, <b>embed_text</b>, <b>embedding</b> vector(384), content_tsv, embedding_model, token_count, metadata jsonb</td><td><span class="tag new">new</span></td></tr>
+              <tr><td class="col">questions</td><td>unchanged — becomes the authoring surface for <code>kind='faq'</code> sources</td><td><span class="tag keep">exists</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <p>Two columns carry design weight. <b><code>embed_text</code> is separate from <code>content</code></b>: for a FAQ row the embedding is computed over the question (plus optional author-supplied paraphrases) while <code>content</code> returned to the model is the answer. That is the direct fix for F3 — you stop comparing a bare query against a question-plus-answer blob. <b><code>embedding_model</code> is stored per chunk</b> so you can index under a new model alongside the old one and cut over per chatbot rather than taking a platform-wide re-index outage.</p>
+
+      <div class="pre-label">Indexes</div>
+      <pre><code>CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE INDEX kc_embedding_hnsw ON knowledge_chunks
+  USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64);
+
+CREATE INDEX kc_tsv      ON knowledge_chunks USING gin (content_tsv);
+CREATE INDEX kc_tenant   ON knowledge_chunks (chatbot_id, source_id);</code></pre>
+
+      <h3>3.3 Structured data</h3>
+
+      <div class="wide">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Table</th><th>Key columns</th></tr></thead>
+            <tbody>
+              <tr><td class="col">data_sources</td><td>id, chatbot_id, <b>name</b> (slug), display_name, description, <b>adapter</b> (<code>records</code> | <code>rest_api</code> | <code>sql_readonly</code>), config jsonb, row_count, sync_status, last_synced_at, is_published</td></tr>
+              <tr><td class="col">data_source_fields</td><td>id, data_source_id, <b>name</b>, label, <b>data_type</b>, path, description, unit, <b>is_exposed</b>, <b>is_filterable</b>, <b>is_sortable</b>, <b>is_searchable</b>, <b>is_returned</b>, <b>allowed_operators</b> text[], enum_values jsonb, cardinality, display_order</td></tr>
+              <tr><td class="col">data_records</td><td>id, data_source_id, external_id, <b>payload</b> jsonb, search_tsv, updated_at, deleted_at &nbsp;·&nbsp; unique (data_source_id, external_id)</td></tr>
+              <tr><td class="col">data_source_syncs</td><td>id, data_source_id, mode, rows_in, rows_upserted, rows_rejected, errors jsonb, started_at, finished_at</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <p><code>data_source_fields</code> is the security boundary, not just documentation. It is the only list of names the validator will accept, and a field with <code>is_exposed = false</code> is invisible to the model in both directions — it cannot be filtered on and it is never returned.</p>
+
+      <h3>3.4 Tools, actions, credentials</h3>
+
+      <div class="wide">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Table</th><th>Key columns</th></tr></thead>
+            <tbody>
+              <tr><td class="col">tools</td><td>id, chatbot_id, <b>name</b>, description, <b>tool_type</b>, configuration jsonb, <b>input_schema</b> jsonb (compiled), schema_version, is_active, requires_confirmation, rate_limit jsonb &nbsp;·&nbsp; unique (chatbot_id, name)</td></tr>
+              <tr><td class="col">actions</td><td>id, chatbot_id, name, description, execution (<code>http</code> | <code>internal</code>), http jsonb {method, url, headers, body_template, timeout_ms}, credential_id, confirmation_required, idempotency_template</td></tr>
+              <tr><td class="col">action_parameters</td><td>id, action_id, name, data_type, required, description, enum_values, default_value, validation jsonb</td></tr>
+              <tr><td class="col">credentials</td><td>id, company_id, name, auth_type, <b>secret_ciphertext</b>, key_version, rotated_at</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="call pick">
+        <span class="lbl">Decision — parameters as rows <em>and</em> as schema</span>
+        <p>You listed <code>tool_parameters</code> as a table. Keep it for actions only, as <code>action_parameters</code>, because a no-code UI needs to edit parameters field by field. But <b><code>tools.input_schema</code> is the compiled artifact</b> — the JSON Schema actually sent to the model, regenerated whenever the source rows or the field registry change. For <code>STRUCTURED_SEARCH</code> and <code>KNOWLEDGE_SEARCH</code> there are no parameter rows at all: the schema is derived from <code>data_source_fields</code>. One source of truth per tool type, one cached compilation.</p>
+      </div>
+
+      <h3>3.5 Conversation and audit</h3>
+
+      <div class="wide">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Table</th><th>Change</th><th></th></tr></thead>
+            <tbody>
+              <tr><td class="col">chat_session</td><td>add chatbot_id, visitor_id, channel, <b>working_set</b> jsonb, summary text, summary_upto_message_id</td><td><span class="tag keep">extend</span></td></tr>
+              <tr><td class="col">chat_message</td><td>add <b>role</b> (<code>user</code>|<code>assistant</code>|<code>tool</code>|<code>system</code>), tool_call_id, tool_name, tool_args jsonb, tool_result jsonb, tool_result_summary text, tokens, latency_ms</td><td><span class="tag keep">extend</span></td></tr>
+              <tr><td class="col">tool_executions</td><td>id, conversation_id, message_id, tool_id, raw_arguments, validated_arguments, status, error_code, rows_returned, duration_ms, created_at</td><td><span class="tag new">new</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <p>Extending <code>chat_message</code> rather than adding a parallel table matters: the transcript an agent reads in the console and the transcript replayed to the model must be the same rows, or the two will drift and the agent will not see what the bot promised the customer.</p>
+
+      <!-- ============ 4 ============ -->
+      <h2 id="s4"><span class="sec">§4</span> Tool registry</h2>
+
+      <p>A tool row is a binding between a business-level name the model sees and an executor the backend owns. The model never learns which is which.</p>
+
+      <div class="wide">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>tool_type</th><th>configuration holds</th><th>input_schema derived from</th><th>executor</th></tr></thead>
+            <tbody>
+              <tr><td class="col">KNOWLEDGE_SEARCH</td><td><code>{source_ids: [..]}</code> or empty for all</td><td>fixed: <code>query</code>, optional <code>top_k</code></td><td>hybrid retriever → pgvector + tsvector</td></tr>
+              <tr><td class="col">STRUCTURED_SEARCH</td><td><code>{data_source_id: 123}</code></td><td>generated from <code>data_source_fields</code></td><td>query compiler → validator → adapter</td></tr>
+              <tr><td class="col">API_ACTION</td><td><code>{action_id: 45}</code></td><td>generated from <code>action_parameters</code></td><td>schema validator → egress-guarded HTTP client</td></tr>
+              <tr><td class="col">HANDOFF</td><td><code>{queue: "support", reason_required: true}</code></td><td>fixed: <code>reason</code>, optional <code>summary</code></td><td>existing <code>flag_agent_needed</code> + agent group push</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="call pick">
+        <span class="lbl">Decision — handoff becomes a tool</span>
+        <p>Today escalation is a side effect of a low similarity score. Make it <code>request_human_agent</code>, a tool the model calls when it judges it cannot help or the customer asks for a person — and keep a <b>server-side safety net</b> independent of the model: N consecutive turns with no successful tool result, an explicit “talk to a human” pattern match, or a tool-budget exhaustion all force the handoff regardless of what the model wants. Model judgement is better at the decision; the server rule is what stops a loop.</p>
+      </div>
+
+      <h3>Compilation and caching</h3>
+
+      <p>Declarations are compiled from config, not written by hand, and cached per <code>(chatbot_id, schema_version)</code>. Invalidate on any write to <code>tools</code>, <code>data_source_fields</code>, or <code>action_parameters</code>. This matters for cost: declarations are re-sent on every model call in a turn, so a 6-tool bot pays roughly 400–900 tokens per round trip just to describe itself.</p>
+
+      <div class="pre-label">Compiled declaration — what the model actually receives</div>
+      <pre><code>{
+  "name": "search_available_listings",
+  "description": "Search available property listings by location, budget,
+                  size and type. Use when the customer describes what they
+                  are looking for. Do not use for policies or company info.",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "city":          { "type": "string", "enum": ["Ahmedabad","Surat","Vadodara"] },
+      "bedrooms":      { "type": "integer", "minimum": 1, "maximum": 10 },
+      "max_price":     { "type": "number", "description": "Upper budget in INR" },
+      "min_price":     { "type": "number" },
+      "property_type": { "type": "string", "enum": ["apartment","villa","plot"] },
+      "sort_by":       { "type": "string", "enum": ["price_asc","price_desc","newest"] },
+      "limit":         { "type": "integer", "minimum": 1, "maximum": 20, "default": 10 }
+    }
+  }
+}</code></pre>
+
+      <p>No <code>data_source_id</code>, no operators, no field paths, no table names. The model sees a business capability; the backend keeps the mapping.</p>
+
+      <!-- ============ 5 ============ -->
+      <h2 id="s5"><span class="sec">§5</span> Structured search</h2>
+
+      <p>Your generic query JSON is the right internal contract. The proposal keeps it exactly — and does <em>not</em> ask the model to produce it.</p>
+
+      <div class="call pick">
+        <span class="lbl">Decision — flat parameters out, filter IR in</span>
+        <p><b>The model emits flat typed parameters; the compiler turns them into your filter IR.</b> A generic <code>filters: [{field, operator, value}]</code> array asks the model to pick a field name, an operator, and a coerced value on every call, and JSON Schema cannot constrain any of them — <code>{"field":"cost","operator":"under","value":"80 lakh"}</code> is schema-valid and wrong three ways. A flat surface makes enums, ranges, and types enforceable <em>in the declaration</em>, so the whole class of error is caught before the call is made.</p>
+        <p>The IR stays the internal contract: adapter-agnostic, validated, logged, and the thing every executor consumes. Data sources that genuinely need OR-groups can opt into an <code>advanced_filters</code> parameter carrying raw IR — validated by exactly the same code path.</p>
+      </div>
+
+      <h3>5.1 Generation rules — fields to parameters</h3>
+
+      <div class="wide">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Field</th><th>Condition</th><th>Generated parameter(s)</th><th>Compiles to</th></tr></thead>
+            <tbody>
+              <tr><td class="col">string</td><td>cardinality ≤ 50</td><td class="col">name (enum)</td><td class="col">equals</td></tr>
+              <tr><td class="col">string</td><td>cardinality &gt; 50</td><td class="col">name (free text)</td><td class="col">equals or ilike, per field config</td></tr>
+              <tr><td class="col">number / integer</td><td>filterable</td><td class="col">min_name, max_name</td><td class="col">gte, lte</td></tr>
+              <tr><td class="col">date / datetime</td><td>filterable</td><td class="col">name_after, name_before</td><td class="col">gte, lte</td></tr>
+              <tr><td class="col">boolean</td><td>filterable</td><td class="col">name</td><td class="col">equals</td></tr>
+              <tr><td class="col">string_array</td><td>filterable</td><td class="col">name (array of enum)</td><td class="col">contains_any</td></tr>
+              <tr><td class="col">any</td><td>sortable</td><td class="col">sort_by (enum of name_asc / name_desc)</td><td class="col">sort clause</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <h3>5.2 The pipeline and where the model's authority stops</h3>
+
+      <figure class="wide">
+        <div class="fig-frame">
+          <svg viewBox="0 0 880 250" role="img" aria-label="A tool call crosses a trust boundary into the backend, where flat parameters are compiled into a filter IR, validated against the field registry, and dispatched to an adapter. Invalid queries are rejected back to the model as a structured error.">
+            <defs>
+              <marker id="ah2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+              </marker>
+              <marker id="ah2r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--risk)"/>
+              </marker>
+            </defs>
+
+            <rect class="svg-box" x="0" y="60" width="104" height="46" rx="2"/>
+            <text class="svg-lbl" x="52" y="80" text-anchor="middle">model</text>
+            <text class="svg-lbl-sm" x="52" y="94" text-anchor="middle">tool call</text>
+
+            <line class="svg-line" x1="104" y1="83" x2="160" y2="83" marker-end="url(#ah2)"/>
+
+            <path class="svg-dash" d="M 138 22 L 138 214"/>
+            <text class="svg-accent-txt" x="146" y="34">AI authority ends here</text>
+
+            <rect class="svg-box-fill" x="160" y="60" width="126" height="46" rx="2"/>
+            <text class="svg-lbl" x="223" y="80" text-anchor="middle">compile</text>
+            <text class="svg-lbl-sm" x="223" y="94" text-anchor="middle">params → IR</text>
+
+            <line class="svg-line" x1="286" y1="83" x2="336" y2="83" marker-end="url(#ah2)"/>
+
+            <rect class="svg-box-fill" x="336" y="52" width="150" height="62" rx="2"/>
+            <text class="svg-lbl" x="411" y="74" text-anchor="middle">validate</text>
+            <text class="svg-lbl-sm" x="411" y="88" text-anchor="middle">field · operator · type</text>
+            <text class="svg-lbl-sm" x="411" y="101" text-anchor="middle">tenancy · limits</text>
+
+            <rect class="svg-box" x="336" y="160" width="150" height="44" rx="2" opacity="0.75"/>
+            <text class="svg-lbl-sm" x="411" y="179" text-anchor="middle">data_source_fields</text>
+            <text class="svg-lbl-sm" x="411" y="192" text-anchor="middle">the allowlist</text>
+            <line class="svg-line" x1="411" y1="160" x2="411" y2="118" marker-end="url(#ah2)" opacity="0.6"/>
+
+            <line class="svg-line" x1="486" y1="83" x2="536" y2="83" marker-end="url(#ah2)"/>
+
+            <rect class="svg-box-fill" x="536" y="60" width="126" height="46" rx="2"/>
+            <text class="svg-lbl" x="599" y="80" text-anchor="middle">adapter</text>
+            <text class="svg-lbl-sm" x="599" y="94" text-anchor="middle">records · REST · SQL</text>
+
+            <line class="svg-line" x1="662" y1="83" x2="712" y2="83" marker-end="url(#ah2)"/>
+
+            <rect class="svg-box" x="712" y="52" width="140" height="62" rx="2"/>
+            <text class="svg-lbl" x="782" y="74" text-anchor="middle">shaped rows</text>
+            <text class="svg-lbl-sm" x="782" y="88" text-anchor="middle">returned fields only</text>
+            <text class="svg-lbl-sm" x="782" y="101" text-anchor="middle">capped + counted</text>
+
+            <path class="svg-risk" d="M 411 114 L 411 138 L 60 138 L 60 106" marker-end="url(#ah2r)"/>
+            <text class="svg-risk-txt" x="240" y="132" text-anchor="middle">reject → structured error the model can correct from</text>
+          </svg>
+        </div>
+        <figcaption><b>Rejection is a feature.</b> A failed validation returns a machine-readable error naming the offending field and the allowed values, so the model's next attempt is informed rather than a blind retry. The dashed line is the invariant: nothing to its right ever reads a value the model chose without checking it against the registry.</figcaption>
+      </figure>
+
+      <div class="pre-label">Internal IR — never generated by the model, always logged</div>
+      <pre><code>{
+  "data_source": "properties",
+  "filters": [
+    { "field": "city",     "operator": "equals",   "value": "Ahmedabad" },
+    { "field": "bedrooms", "operator": "equals",   "value": 3 },
+    { "field": "price",    "operator": "lte",      "value": 8000000 }
+  ],
+  "sort":  [{ "field": "price", "direction": "asc" }],
+  "limit": 10,
+  "offset": 0
+}</code></pre>
+
+      <h3>5.3 Adapters</h3>
+
+      <ul>
+        <li><b><code>records</code> (default).</b> Rows live in <code>data_records.payload</code> as JSONB. Filters compile to Django ORM <code>KeyTextTransform</code> lookups with an explicit cast per declared type. A GIN <code>jsonb_path_ops</code> index serves equality; B-tree expression indexes on numeric and date fields are created once when a data source is published, not per query.</li>
+        <li><b><code>rest_api</code>.</b> The IR maps to query parameters through a per-source template. Same validation, different sink. Subject to the egress rules in §7.</li>
+        <li><b><code>sql_readonly</code>.</b> A read-only connection to a tenant's own database with an allowlisted table and column set. Highest value, highest risk — defer past v1.</li>
+      </ul>
+
+      <div class="call note">
+        <span class="lbl">Trade-off — JSONB versus real columns</span>
+        <p>A single JSONB table means zero DDL per tenant and one code path, at the cost of casts on every filter. Per-source physical tables are faster and type-safe but require runtime DDL, which is an operational and security liability at tenant scale. <b>Start with JSONB.</b> It comfortably serves the tens-of-thousands-of-rows range that covers most tenants, and the adapter boundary means a specific large tenant can be moved to a materialized table later without touching the compiler, the validator, or the model.</p>
+      </div>
+
+      <h3>5.4 Result shaping</h3>
+
+      <p>What comes back is as much a design decision as what goes in — it is the model's context budget being spent.</p>
+
+      <div class="pre-label">Tool result</div>
+      <pre><code>{
+  "matched": 47,
+  "returned": 10,
+  "rows": [ { "title": "...", "city": "Ahmedabad", "price": 7500000,
+              "bedrooms": 3, "ref": "PROP-1182" } ],
+  "truncated": true,
+  "relaxable_filters": ["max_price"]
+}</code></pre>
+
+      <p>Three things earn their place. <code>matched</code> lets the model say “47 match, here are 10” instead of implying it saw everything. <code>truncated</code> prompts it to offer narrowing rather than inventing a total. And on a zero-result query, <code>relaxable_filters</code> — computed by re-running the query with each filter dropped in turn — lets the model say <em>“nothing at 80 lakh; the cheapest 3 BHK on SG Highway is 92”</em> instead of a dead end. That is generic logic, no industry knowledge in it.</p>
+
+      <!-- ============ 6 ============ -->
+      <h2 id="s6"><span class="sec">§6</span> Knowledge search</h2>
+
+      <p>Same retrieval quality goals as today, reached differently — and now only when the model asks for it.</p>
+
+      <h3>6.1 Retrieval</h3>
+
+      <ol class="numbered">
+        <li><b>Embed the query</b> with the chunk's own <code>embedding_model</code>, normalized. Cache identical queries per chatbot for the session.</li>
+        <li><b>Two recalls in parallel.</b> pgvector HNSW cosine (top 30) and Postgres full-text over <code>content_tsv</code> (top 30). Vector alone is weak exactly where business content is strong: SKUs, policy names, plan tiers, error codes.</li>
+        <li><b>Fuse with Reciprocal Rank Fusion</b> (<code>score = Σ 1/(60 + rank)</code>). No score normalization needed between two incomparable scales, which is what makes RRF the right choice here.</li>
+        <li><b>Apply the accept gate</b> (6.2), then cap to <code>top_k</code> chunks and a hard token ceiling (~1200 tokens).</li>
+      </ol>
+
+      <h3>6.2 The relevance gate</h3>
+
+      <p>Replacing a single global constant with three per-chatbot signals:</p>
+
+      <div class="wide">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Signal</th><th>Purpose</th><th>Starting value</th></tr></thead>
+            <tbody>
+              <tr><td class="col">retrieval_floor</td><td>Discard obvious noise before fusion</td><td class="num">cosine ≥ 0.32</td></tr>
+              <tr><td class="col">accept_threshold</td><td>Below this, return zero chunks rather than weak ones</td><td class="num">fused rank-1 in top decile</td></tr>
+              <tr><td class="col">margin_rule</td><td>If rank 1 and rank 5 are indistinguishable, the query is probably off-domain</td><td class="num">Δ ≥ 15%</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="call risk">
+        <span class="lbl">These numbers are starting points, not answers</span>
+        <p>Any threshold that is not measured against your own labelled data is a guess — which is how <code>0.90</code> got there. Build a fixture of ~50 questions per pilot tenant tagged <em>answerable</em> or <em>not</em>, and tune per chatbot against precision on the “not” set. Store the result in <code>chatbots.policy</code>. Ship the measurement harness in the same phase as the retriever, not later.</p>
+      </div>
+
+      <p>When nothing clears the gate the tool returns <code>{"chunks": [], "reason": "no_relevant_content"}</code>. This is the single most important behavioural difference from today: an empty result is a <em>useful</em> signal the model can act on — ask a clarifying question, try a different tool, offer a human — whereas three irrelevant FAQs are actively harmful, because a capable model will try to answer from them.</p>
+
+      <p>Keep the existing <code>is_answer_found</code> self-assessment, but treat it as a separate axis. Retrieval score answers <em>did we find something</em>; the model answers <em>was it enough</em>. Logging both against real conversations is what makes the thresholds tunable.</p>
+
+      <!-- ============ 7 ============ -->
+      <h2 id="s7"><span class="sec">§7</span> Actions</h2>
+
+      <p>Actions are the only capability that writes to the world, and the only one where a business user supplies a URL you will call. Both facts drive the design.</p>
+
+      <h3>7.1 Confirmation for writes</h3>
+
+      <p>Two-phase, enforced server-side rather than by prompt instruction. When <code>requires_confirmation</code> is set, the first invocation does not execute:</p>
+
+      <div class="pre-label">First call → not executed</div>
+      <pre><code>{
+  "status": "confirmation_required",
+  "summary": "Create a lead for Priya Shah, +91 98250 11111",
+  "confirmation_token": "cnf_9f2a…"
+}</code></pre>
+
+      <p>The model relays the summary, the customer agrees, and the model calls again with the token. Tokens are single-use, scoped to the conversation, bound to a hash of the validated arguments, and expire in five minutes — so a model that “confirms itself” or drifts on the arguments between calls fails closed.</p>
+
+      <h3>7.2 Egress control</h3>
+
+      <div class="call risk">
+        <span class="lbl">SSRF is the headline risk of this feature</span>
+        <p>“Business users configure an API URL” is a server-side request forgery primitive handed to your least-trusted input. Non-negotiables: per-company URL allowlist; DNS resolution <em>before</em> connect with the resolved IP checked against RFC1918, loopback, link-local and <code>169.254.169.254</code>, then pinned for the request to close the TOCTOU gap; redirects disabled or re-validated per hop; HTTP(S) only; hard timeout; response size cap; no credentials forwarded cross-host.</p>
+      </div>
+
+      <h3>7.3 Everything else</h3>
+
+      <ul>
+        <li><b>Secrets never enter the schema.</b> Credentials resolve from <code>credentials.secret_ciphertext</code> at execution time and are injected into headers by the client. The model cannot see, request, or supply them, and they are redacted from <code>tool_executions</code>.</li>
+        <li><b>Idempotency.</b> A key derived from <code>(conversation_id, action_id, hash(arguments))</code> goes out as <code>Idempotency-Key</code> and is checked locally, so a retry after a timeout does not create two leads.</li>
+        <li><b>Rate limits</b> at three scopes: per conversation per tool, per company per tool per minute, and a global egress ceiling.</li>
+        <li><b>Circuit breaker</b> per action — after N consecutive failures the tool is withheld from the declaration list and the model routes around it instead of retrying into a dead endpoint.</li>
+      </ul>
+
+      <!-- ============ 8 ============ -->
+      <h2 id="s8"><span class="sec">§8</span> Orchestration loop</h2>
+
+      <h3>8.1 The turn</h3>
+
+      <ol class="numbered">
+        <li>Resolve conversation → chatbot → policy. <b>Bind <code>chatbot_id</code> and <code>company_id</code> to the turn now</b>; nothing downstream reads them from anywhere else, ever.</li>
+        <li>If a human agent owns the session, skip the model entirely and deliver to the agent — the existing <code>_live_agent_id</code> check, unchanged and still first.</li>
+        <li>Assemble context (§9). Load cached tool declarations.</li>
+        <li>Call the model with history + declarations.</li>
+        <li>No tool call → stream the reply, persist, done.</li>
+        <li>Tool call(s) → validate (§10) → execute, in parallel when independent → append <code>role='tool'</code> messages → return to step 4.</li>
+        <li>On budget exhaustion, degrade deliberately: one final model call with tools withheld and an instruction to answer from what it has or hand off.</li>
+      </ol>
+
+      <h3>8.2 Budgets</h3>
+
+      <div class="wide">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Budget</th><th>Default</th><th>On breach</th></tr></thead>
+            <tbody>
+              <tr><td class="col">tool_calls_per_turn</td><td class="num">4</td><td>Withhold tools, force a final answer</td></tr>
+              <tr><td class="col">model_round_trips</td><td class="num">3</td><td>Same</td></tr>
+              <tr><td class="col">wall_clock_ms</td><td class="num">20 000</td><td>Apologise + offer handoff</td></tr>
+              <tr><td class="col">single_tool_timeout_ms</td><td class="num">6 000</td><td>Return a timeout result to the model, continue</td></tr>
+              <tr><td class="col">repeat_identical_call</td><td class="num">1</td><td>Return a cached result, do not re-execute</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <p>A tool that times out returns a <em>result</em>, not an exception. The model handles “that lookup did not respond” far better than the orchestrator handles an unwind mid-turn, and the customer gets a sentence instead of a spinner.</p>
+
+      <h3>8.3 Worked example — the multi-turn case</h3>
+
+      <div class="pre-label">Turn 1</div>
+      <pre><code>customer  "I want to buy a property in Ahmedabad"
+
+model  → search_available_listings({ city: "Ahmedabad", limit: 10 })
+tool   ← { matched: 312, returned: 10, truncated: true,
+           rows: [...] }
+model  → "We have 312 listings in Ahmedabad. To narrow it down —
+          what's your budget, and how many bedrooms?"</code></pre>
+
+      <div class="pre-label">Turn 2 — the follow-up</div>
+      <pre><code>customer  "Under 80 lakh and 3 BHK, near SG Highway"
+
+model  → search_available_listings({ city: "Ahmedabad", bedrooms: 3,
+                                     max_price: 8000000,
+                                     locality: "SG Highway" })
+tool   ← { matched: 0, returned: 0, relaxable_filters: ["max_price"] }
+model  → search_available_listings({ city: "Ahmedabad", bedrooms: 3,
+                                     locality: "SG Highway",
+                                     sort_by: "price_asc", limit: 5 })
+tool   ← { matched: 18, returned: 5, rows: [ { price: 9200000, ... } ] }
+model  → "Nothing on SG Highway at 3 BHK under 80 lakh right now.
+          The closest is 92 lakh — want me to show those, or widen
+          the area?"</code></pre>
+
+      <p>Two things to notice. <code>city: "Ahmedabad"</code> reappears in turn 2 because the turn-1 tool call is in the replayed history — <b>no filter state store, no slot machine, no merge logic</b>. And the second call in turn 2 is the model reacting to <code>relaxable_filters</code> within a single turn, which is exactly the behaviour the loop buys you and the current pipeline cannot express at all.</p>
+
+      <!-- ============ 9 ============ -->
+      <h2 id="s9"><span class="sec">§9</span> Conversation context</h2>
+
+      <div class="call pick">
+        <span class="lbl">Decision — the message log is the state</span>
+        <p>Persist tool calls and tool results as <code>chat_message</code> rows and replay them. <b>Do not auto-merge filters server-side.</b> Sticky server-side filters are invisible to the model and to the customer, and become impossible to clear — “actually, anywhere in Gujarat” has to defeat a merge rule the model does not know exists. Re-emission from history is self-correcting: what the model can see, it can change.</p>
+      </div>
+
+      <p>Context assembly per turn, in order:</p>
+
+      <ol class="numbered">
+        <li><b>System prompt</b> — platform rules + <code>chatbots.persona_prompt</code>.</li>
+        <li><b>Rolling summary</b> of everything before the recent window, regenerated when the window slides.</li>
+        <li><b>Last 8 turns verbatim</b>, including tool calls with their arguments.</li>
+        <li><b>Tool results</b>: full JSON for the last 2 turns; older ones replaced by <code>tool_result_summary</code> (“returned 10 of 312 Ahmedabad listings”). Row payloads dominate the context budget and age badly — the <em>call</em> is what carries forward, not the rows.</li>
+        <li><b>Working set</b>, if non-empty (below).</li>
+      </ol>
+
+      <h3><code>working_set</code> — deliberately small</h3>
+
+      <p>A JSONB column on the session holding only what must survive summarization: the last successful query per data source, confirmed identity fields the customer has already given, and any pending confirmation token. It is a <b>cache, not a source of truth</b> — cleared on session close, never read by a validator, and reconstructible from the message log. Anything richer is a dialogue state machine, which is the industry-specific hardcoding this design exists to avoid.</p>
+
+      <!-- ============ 10 ============ -->
+      <h2 id="s10"><span class="sec">§10</span> Validation and security</h2>
+
+      <p>Ten gates, in order. Every tool execution passes all of them; none is skippable by tool type.</p>
+
+      <div class="wide">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th></th><th>Gate</th><th>Enforces</th><th>On failure</th></tr></thead>
+            <tbody>
+              <tr><td class="col">G1</td><td>Tenancy binding</td><td><code>chatbot_id</code> / <code>company_id</code> come from the server-side session. Model-supplied tenant identifiers are ignored, not merely validated.</td><td>Drop + alert</td></tr>
+              <tr><td class="col">G2</td><td>Tool authorization</td><td>Tool exists, is active, belongs to this chatbot</td><td>Error to model</td></tr>
+              <tr><td class="col">G3</td><td>Argument schema</td><td>JSON Schema 2020-12 against <code>input_schema</code></td><td>Error to model</td></tr>
+              <tr><td class="col">G4</td><td>Field exposure</td><td>Every referenced field is <code>is_exposed</code> on that data source</td><td>Error to model</td></tr>
+              <tr><td class="col">G5</td><td>Operator allowlist</td><td>Operator is in that field's <code>allowed_operators</code></td><td>Error to model</td></tr>
+              <tr><td class="col">G6</td><td>Type coercion</td><td>Value casts to the declared type; enums matched exactly</td><td>Error to model</td></tr>
+              <tr><td class="col">G7</td><td>Limits</td><td>Row cap, offset cap, filter-count cap, token cap</td><td>Clamp silently</td></tr>
+              <tr><td class="col">G8</td><td>Egress</td><td>Allowlist + resolved-IP check + pinned connect (§7.2)</td><td>Drop + alert</td></tr>
+              <tr><td class="col">G9</td><td>Budget</td><td>Per-conversation and per-company rate limits</td><td>Error to model</td></tr>
+              <tr><td class="col">G10</td><td>Audit</td><td>Write <code>tool_executions</code> — raw args, validated args, outcome, timing</td><td>—</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <p><b>G1 is the one that must never be relaxed.</b> Every cross-tenant leak in a system shaped like this traces back to a tenant identifier that arrived as a tool argument. Treat model output as untrusted user input, because in a prompt-injection scenario that is precisely what it is.</p>
+
+      <h3>Prompt injection through tool results</h3>
+
+      <p>Retrieved chunks and fetched rows are content a tenant uploaded — or, in the <code>rest_api</code> case, content a third party returned. Wrap every tool result in an explicit data envelope, state in the system prompt that tool output is data and never instruction, and enforce the part that actually holds: <b>no tool result can change tool availability, tenancy binding, or confirmation state.</b> Those live in server state, so a successful injection can mislead a reply but cannot escalate a capability.</p>
+
+      <!-- ============ 11 ============ -->
+      <h2 id="s11"><span class="sec">§11</span> Configuration UX</h2>
+
+      <p>Adding an industry must be configuration, not a deploy. Six steps, all in the existing React dashboard:</p>
+
+      <ol class="numbered">
+        <li><b>Knowledge</b> — the current FAQ editor, plus document and URL upload. Chunking and embedding are background jobs with visible progress.</li>
+        <li><b>Connect data</b> — CSV upload first (covers most pilots), then REST and read-only SQL.</li>
+        <li><b>Schema review</b> — types inferred from a sample; the user confirms or corrects. Inference is a suggestion, never silently authoritative.</li>
+        <li><b>Field permissions</b> — the screen that matters. One row per field with toggles for exposed / filterable / sortable / returned, and operator chips. This is where <code>internal_margin</code> stays invisible.</li>
+        <li><b>Actions</b> — endpoint, method, parameters, credential, confirmation flag. A “send test request” button that shows the exact outbound call.</li>
+        <li><b>Tool descriptions</b> — name and description per tool, with a live <em>“what the AI sees”</em> panel rendering the compiled declaration.</li>
+      </ol>
+
+      <div class="call pick">
+        <span class="lbl">Build the test console in the same phase</span>
+        <p>A test chat that shows every tool call, its validated arguments, the result, and the timing — inline, next to the conversation. Tool descriptions are prompt engineering whether or not you call them that, and a business user cannot write a good one blind. Without this screen every misconfigured bot becomes a support ticket you have to debug from logs; with it, the person who wrote the description can see it being ignored and fix it themselves.</p>
+      </div>
+
+      <!-- ============ 12 ============ -->
+      <h2 id="s12"><span class="sec">§12</span> Scaling and operations</h2>
+
+      <ul>
+        <li><b>Redis channel layer.</b> Prerequisite, not an optimization (F8).</li>
+        <li><b>Orchestration off the consumer.</b> A turn is now seconds of model latency. The consumer enqueues; a worker runs the loop and publishes tokens back through the session group. This is also what makes multi-worker deployment possible at all.</li>
+        <li><b>Stream the final answer</b> and emit a lightweight “checking our listings…” event when a tool starts, keyed off the tool's own description. Perceived latency is most of the UX here.</li>
+        <li><b>Move embedding out of the request path.</b> MiniLM in-process is ~10ms but it is CPU-bound work inside an async consumer. Worker-side, or a small embedding service if you later want GPU batching.</li>
+        <li><b>Watch the dimension lock-in.</b> <code>vector(384)</code> is a column type. <code>embedding_model</code> per chunk (§3.2) is what keeps a model upgrade from being a platform-wide outage.</li>
+        <li><b>Cost.</b> Tool declarations are re-sent every round trip. Cache the compiled JSON, keep descriptions tight, and prune unused tools — a bot with 15 tools pays for all 15 on every call whether or not any is used.</li>
+      </ul>
+
+      <h4>Latency budget, typical two-tool turn</h4>
+
+      <div class="wide">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Stage</th><th>Target</th></tr></thead>
+            <tbody>
+              <tr><td>Context assembly + declaration cache hit</td><td class="num">&lt; 30 ms</td></tr>
+              <tr><td>Model round trip 1 (decide)</td><td class="num">600–1200 ms</td></tr>
+              <tr><td>Tool execution (pgvector or JSONB, indexed)</td><td class="num">20–120 ms</td></tr>
+              <tr><td>Model round trip 2 (compose, streamed)</td><td class="num">800–2000 ms</td></tr>
+              <tr><td><b>First token to customer</b></td><td class="num"><b>~1.5–3.5 s</b></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ============ 13 ============ -->
+      <h2 id="s13"><span class="sec">§13</span> Migration plan</h2>
+
+      <div class="wide">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Phase</th><th>Ships</th><th>Proves</th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="col">0 — Unblock</td>
+                <td>Session tokens replacing <code>?user_type=</code>; Redis channel layer; pgvector migration for <code>questions.embedding</code>; fix the threshold and the query/index text asymmetry</td>
+                <td>Existing bot gets faster and stops over-escalating. No architecture change yet.</td>
+              </tr>
+              <tr>
+                <td class="col">1 — Loop</td>
+                <td><code>chatbots</code> + <code>tools</code>; orchestrator with exactly two tools (<code>search_knowledge</code>, <code>request_human_agent</code>); consumer reduced to transport; conversation history in context</td>
+                <td>The loop, the budgets, and multi-turn — at feature parity with today plus follow-ups.</td>
+              </tr>
+              <tr>
+                <td class="col">2 — Structured</td>
+                <td><code>data_sources</code> / <code>data_source_fields</code> / <code>data_records</code>; CSV import; declaration generator; IR compiler; validator; <code>records</code> adapter</td>
+                <td>Real estate <em>and</em> one unrelated vertical on the same code, differing only by rows in the registry.</td>
+              </tr>
+              <tr>
+                <td class="col">3 — Actions</td>
+                <td><code>actions</code> / <code>credentials</code>; egress guard; confirmation flow; rate limits; circuit breaker</td>
+                <td>Lead capture end to end, with a security review against §7.2 before it faces the internet.</td>
+              </tr>
+              <tr>
+                <td class="col">4 — Self-serve</td>
+                <td>The §11 config UI, the test console, threshold tuning per tenant</td>
+                <td>A new tenant onboards with no engineering involvement. That is the actual product goal.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <p>Phase 1 is the one to protect from scope creep. Two tools is enough to prove the loop, and every later capability is a registry row plus an executor — which is precisely the claim the architecture is making.</p>
+
+      <!-- ============ 14 ============ -->
+      <h2 id="s14"><span class="sec">§14</span> Open decisions</h2>
+
+      <p>Six calls I would like made before implementation. My recommendation is on each, but the trade-offs are real.</p>
+
+      <div class="wide qgrid">
+        <div class="qcell">
+          <span class="qn">D1</span>
+          <h4>Introduce <code>chatbots</code> now, or keep <code>company</code> as the tenant key?</h4>
+          <p>Adding it later means backfilling every tool, source, and conversation row.</p>
+          <p class="rec">→ Now. It is one table and one FK while the data is small.</p>
+        </div>
+        <div class="qcell">
+          <span class="qn">D2</span>
+          <h4>JSONB record store, or per-source physical tables?</h4>
+          <p>JSONB: one code path, casts on filter. Physical: faster, runtime DDL.</p>
+          <p class="rec">→ JSONB, with the adapter seam that lets a big tenant migrate later.</p>
+        </div>
+        <div class="qcell">
+          <span class="qn">D3</span>
+          <h4>Flat parameters, or the raw filter IR as the model-facing schema?</h4>
+          <p>Flat is more accurate and enforceable; IR is more expressive.</p>
+          <p class="rec">→ Flat, with opt-in <code>advanced_filters</code> for sources that need OR-groups.</p>
+        </div>
+        <div class="qcell">
+          <span class="qn">D4</span>
+          <h4>Bind to Gemini, or abstract the provider now?</h4>
+          <p>Function-calling shapes differ enough that retrofitting is painful.</p>
+          <p class="rec">→ A thin adapter now: declarations in, calls out. A day's work, not a framework.</p>
+        </div>
+        <div class="qcell">
+          <span class="qn">D5</span>
+          <h4>Add a cross-encoder reranker to knowledge search?</h4>
+          <p>Meaningfully better precision, ~50–150 ms and another model to host.</p>
+          <p class="rec">→ Not in v1. Ship RRF, measure with the §6.2 harness, revisit with data.</p>
+        </div>
+        <div class="qcell">
+          <span class="qn">D6</span>
+          <h4>Is handoff the model's decision or the server's?</h4>
+          <p>Model judgement is better; a server rule is what breaks loops.</p>
+          <p class="rec">→ Both. Tool for intent, independent server rule as the safety net.</p>
+        </div>
+      </div>
+
+      <hr class="divider">
+
+      <p>The measure of whether this worked is narrow and testable: <b>onboarding a vertical nobody anticipated should touch no Python.</b> If adding hotels, or clinics, or a used-car marketplace requires a new executor, a new branch, or a new prompt template, the abstraction has leaked and the fix belongs in the registry, not in the orchestrator.</p>
+
+      <footer>
+        Architecture proposal · TEMPSERVER · decisions requested in §14
+      </footer>
+    </main>
+  </div>
+</div>

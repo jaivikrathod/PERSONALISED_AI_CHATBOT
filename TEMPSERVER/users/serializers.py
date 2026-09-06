@@ -1,5 +1,8 @@
 from rest_framework import serializers
 
+from company.models import Company
+from company.serializers import CompanySerializer
+
 from .models import User
 
 
@@ -34,7 +37,9 @@ class UserSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         # These are managed by the DB/model and must never be set by clients.
-        read_only_fields = ["id", "created_at", "updated_at"]
+        # `company` is deliberately read-only: it is pinned to the caller's
+        # token by CompanyScopedQuerysetMixin, never taken from the body.
+        read_only_fields = ["id", "company", "created_at", "updated_at"]
 
     def validate_name(self, value):
         """Ensure the name is not blank/whitespace only."""
@@ -71,3 +76,56 @@ class LoginSerializer(serializers.Serializer):
 
     email = serializers.EmailField()
     password = serializers.CharField(write_only=True)
+
+class RegistrationSerializer(serializers.Serializer):
+    """Creates a company and its first Admin user in one call.
+
+    Replaces the old two-request flow (POST /companies/ then POST /users/),
+    which required user creation to be publicly writable. Now the only
+    unauthenticated write is this one, and it can only produce an Admin bound
+    to the company it just created.
+    """
+
+    company = CompanySerializer()
+    admin = serializers.DictField(write_only=True)
+
+    def validate_admin(self, value):
+        # Re-use UserSerializer's own validation for the admin half, minus the
+        # company FK, which this serializer supplies after creating it.
+        required = {"name", "email", "password", "gender", "dob"}
+        missing = sorted(required - set(value))
+        if missing:
+            raise serializers.ValidationError(
+                f"Missing required admin fields: {', '.join(missing)}."
+            )
+
+        email = str(value["email"]).lower().strip()
+        if User.objects.filter(email=email).exists():
+            raise serializers.ValidationError("A user with this email already exists.")
+        if len(str(value["password"])) < 6:
+            raise serializers.ValidationError(
+                "Password must be at least 6 characters."
+            )
+
+        value["email"] = email
+        return value
+
+    def create(self, validated_data):
+        company = Company.objects.create(**validated_data["company"])
+
+        admin_data = dict(validated_data["admin"])
+        raw_password = admin_data.pop("password")
+        # Type is forced, not read from input: registration mints Admins only.
+        admin_data.pop("type", None)
+        admin_data.pop("company", None)
+
+        admin = User(
+            **admin_data,
+            company=company,
+            type=User.Type.ADMIN,
+        )
+        admin.set_password(raw_password)
+        admin.save()
+
+        return company, admin
+

@@ -3,41 +3,34 @@ import api from './axiosInstance'
 /**
  * Company user management (`users.ManagedUserViewSet`).
  *
- * Every call carries `?user_type=<caller type>`: the backend
- * `IsAdminOrManager` permission reads it to authorize the request, and
- * `?company_id=` scopes the list to a single company.
+ * The old `?user_type=` and `?company_id=` parameters are gone: the server now
+ * reads both the caller's role and their company from the bearer token, so
+ * neither can be supplied by the client. Users are created into the caller's
+ * own company automatically.
  *
- *   GET    /managed-users/?company_id=&user_type=
- *   POST   /managed-users/?user_type=
- *   PUT    /managed-users/:id/?user_type=
- *   DELETE /managed-users/:id/?user_type=
+ *   GET    /managed-users/
+ *   POST   /managed-users/
+ *   PUT    /managed-users/:id/
+ *   DELETE /managed-users/:id/
  */
 export const userService = {
-  async list({ companyId, userType }) {
-    const { data } = await api.get('/managed-users/', {
-      params: { company_id: companyId, user_type: userType },
-    })
+  async list() {
+    const { data } = await api.get('/managed-users/')
     return data
   },
 
-  async create(payload, { userType }) {
-    const { data } = await api.post('/managed-users/', payload, {
-      params: { user_type: userType },
-    })
+  async create(payload) {
+    const { data } = await api.post('/managed-users/', payload)
     return data
   },
 
-  async update(id, payload, { userType }) {
-    const { data } = await api.put(`/managed-users/${id}/`, payload, {
-      params: { user_type: userType },
-    })
+  async update(id, payload) {
+    const { data } = await api.put(`/managed-users/${id}/`, payload)
     return data
   },
 
-  async remove(id, { userType }) {
-    await api.delete(`/managed-users/${id}/`, {
-      params: { user_type: userType },
-    })
+  async remove(id) {
+    await api.delete(`/managed-users/${id}/`)
     return id
   },
 }

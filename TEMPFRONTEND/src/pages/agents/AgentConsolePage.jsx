@@ -12,7 +12,6 @@ import ConversationListItem from '../../components/chat/ConversationListItem'
 import MessageBubble from '../../components/chat/MessageBubble'
 import MessageComposer from '../../components/chat/MessageComposer'
 import MessageThread from '../../components/chat/MessageThread'
-import useAuth from '../../hooks/useAuth'
 import useAgentSocket from '../../hooks/useAgentSocket'
 import { SESSION_STATUS } from '../../utils/constants'
 import {
@@ -40,9 +39,6 @@ const SENDER_VIEW = {
  */
 export default function AgentConsolePage() {
   const dispatch = useDispatch()
-  const { user } = useAuth()
-  const agentId = user?.id
-
   const {
     chats,
     activeSessionId,
@@ -59,36 +55,36 @@ export default function AgentConsolePage() {
   const openChatCount = useSelector(selectOpenChatCount)
   const isClosed = activeChat?.status === SESSION_STATUS.CLOSED
 
-  const { sendMessage, closeChat } = useAgentSocket(agentId)
+  const { sendMessage, closeChat } = useAgentSocket()
 
   // REST first so the inbox renders even if the socket is unavailable.
   useEffect(() => {
-    if (agentId) dispatch(fetchAgentChats(agentId))
-  }, [dispatch, agentId])
+    dispatch(fetchAgentChats())
+  }, [dispatch])
 
   const openChat = useCallback(
     (sessionId) => {
       dispatch(chatOpened(sessionId))
-      dispatch(fetchAgentHistory({ agentId, sessionId }))
+      dispatch(fetchAgentHistory({ sessionId }))
     },
-    [dispatch, agentId],
+    [dispatch],
   )
 
   /** Socket first; the REST endpoint is the fallback when it dropped. */
   const handleSend = useCallback(
     (text) => {
       if (sendMessage(activeSessionId, text)) return true
-      dispatch(sendAgentMessage({ agentId, sessionId: activeSessionId, message: text }))
+      dispatch(sendAgentMessage({ sessionId: activeSessionId, message: text }))
       return true
     },
-    [dispatch, sendMessage, agentId, activeSessionId],
+    [dispatch, sendMessage, activeSessionId],
   )
 
   const handleClose = useCallback(() => {
     if (!activeSessionId) return
     if (closeChat(activeSessionId)) return
-    dispatch(closeAgentChat({ agentId, sessionId: activeSessionId }))
-  }, [dispatch, closeChat, agentId, activeSessionId])
+    dispatch(closeAgentChat({ sessionId: activeSessionId }))
+  }, [dispatch, closeChat, activeSessionId])
 
   return (
     <div>

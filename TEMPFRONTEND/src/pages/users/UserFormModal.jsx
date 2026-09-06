@@ -17,8 +17,12 @@ const EMPTY = {
   is_archived: false,
 }
 
-/** Payload shape expected by `users.UserSerializer`. */
-function buildPayload(values, companyId) {
+/** Payload shape expected by `users.UserSerializer`.
+ *
+ * `company` is deliberately absent: the server pins new users to the caller's
+ * own company and ignores the field, so sending it would only be misleading.
+ */
+function buildPayload(values) {
   return {
     name: values.name.trim(),
     email: values.email.trim(),
@@ -26,14 +30,13 @@ function buildPayload(values, companyId) {
     password: values.password?.trim() || undefined,
     gender: values.gender,
     dob: values.dob,
-    company: companyId,
     type: values.type,
     active: values.active,
     is_archived: values.is_archived,
   }
 }
 
-export default function UserFormModal({ open, onClose, user, companyId, userType }) {
+export default function UserFormModal({ open, onClose, user }) {
   const dispatch = useDispatch()
   const saving = useSelector((s) => s.users.saving)
   const isEdit = Boolean(user)
@@ -76,10 +79,10 @@ export default function UserFormModal({ open, onClose, user, companyId, userType
   const isArchived = watch('is_archived')
 
   const onSubmit = async (values) => {
-    const payload = buildPayload(values, companyId)
+    const payload = buildPayload(values)
     const result = isEdit
-      ? await dispatch(updateUser({ id: user.id, payload, userType }))
-      : await dispatch(createUser({ payload, userType }))
+      ? await dispatch(updateUser({ id: user.id, payload }))
+      : await dispatch(createUser({ payload }))
 
     const succeeded = isEdit
       ? updateUser.fulfilled.match(result)

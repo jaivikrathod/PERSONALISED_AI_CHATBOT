@@ -16,7 +16,6 @@ import {
   Table,
 } from '../../components/ui'
 import UserFormModal from './UserFormModal'
-import useAuth from '../../hooks/useAuth'
 import { formatDate } from '../../utils/format'
 import { addToast } from '../../redux/slices/uiSlice'
 import { deleteUser, fetchUsers } from '../../redux/slices/userSlice'
@@ -30,7 +29,6 @@ const TYPE_TONE = {
 /** Company user management — Admin and Manager only (enforced by RoleRoute). */
 export default function UsersPage() {
   const dispatch = useDispatch()
-  const { companyId, userType } = useAuth()
   const { items, status, deletingId } = useSelector((s) => s.users)
 
   const [search, setSearch] = useState('')
@@ -39,12 +37,11 @@ export default function UsersPage() {
   const [deleting, setDeleting] = useState(null)
 
   const load = useCallback(async () => {
-    if (!companyId || !userType) return
-    const result = await dispatch(fetchUsers({ companyId, userType }))
+    const result = await dispatch(fetchUsers())
     if (fetchUsers.rejected.match(result)) {
       dispatch(addToast({ type: 'error', message: result.payload }))
     }
-  }, [dispatch, companyId, userType])
+  }, [dispatch])
 
   useEffect(() => {
     load()
@@ -64,7 +61,7 @@ export default function UsersPage() {
   // would make it a render-time memo dependency, which throws while null.
   const confirmDelete = async (target) => {
     if (!target) return
-    const result = await dispatch(deleteUser({ id: target.id, userType }))
+    const result = await dispatch(deleteUser({ id: target.id }))
     setDeleting(null)
     dispatch(
       addToast(
@@ -197,8 +194,6 @@ export default function UsersPage() {
         open={formOpen}
         onClose={() => setFormOpen(false)}
         user={editing}
-        companyId={companyId}
-        userType={userType}
       />
 
       <ConfirmDialog

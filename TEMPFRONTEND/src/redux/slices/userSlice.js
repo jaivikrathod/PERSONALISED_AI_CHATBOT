@@ -8,9 +8,9 @@ import userService from '../../services/userService'
 
 export const fetchUsers = createAsyncThunk(
   'users/fetch',
-  async ({ companyId, userType }, { rejectWithValue }) => {
+  async (_, { rejectWithValue }) => {
     try {
-      return await userService.list({ companyId, userType })
+      return await userService.list()
     } catch (err) {
       return rejectWithValue(err.message || 'Failed to load users.')
     }
@@ -19,9 +19,9 @@ export const fetchUsers = createAsyncThunk(
 
 export const createUser = createAsyncThunk(
   'users/create',
-  async ({ payload, userType }, { rejectWithValue }) => {
+  async ({ payload }, { rejectWithValue }) => {
     try {
-      return await userService.create(payload, { userType })
+      return await userService.create(payload)
     } catch (err) {
       return rejectWithValue(err.message || 'Failed to save user.')
     }
@@ -30,9 +30,9 @@ export const createUser = createAsyncThunk(
 
 export const updateUser = createAsyncThunk(
   'users/update',
-  async ({ id, payload, userType }, { rejectWithValue }) => {
+  async ({ id, payload }, { rejectWithValue }) => {
     try {
-      return await userService.update(id, payload, { userType })
+      return await userService.update(id, payload)
     } catch (err) {
       return rejectWithValue(err.message || 'Failed to save user.')
     }
@@ -41,9 +41,9 @@ export const updateUser = createAsyncThunk(
 
 export const deleteUser = createAsyncThunk(
   'users/delete',
-  async ({ id, userType }, { rejectWithValue }) => {
+  async ({ id }, { rejectWithValue }) => {
     try {
-      return await userService.remove(id, { userType })
+      return await userService.remove(id)
     } catch (err) {
       return rejectWithValue(err.message || 'Failed to delete user.')
     }

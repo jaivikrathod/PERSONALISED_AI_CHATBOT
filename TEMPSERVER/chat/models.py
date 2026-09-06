@@ -1,7 +1,14 @@
+import secrets
+
 from django.db import models
 
 from company.models import Company
 from users.models import User
+
+
+def new_public_token() -> str:
+    """Unguessable handle a browser uses to reclaim its own anonymous chat."""
+    return secrets.token_urlsafe(24)
 
 
 class ChatSession(models.Model):
@@ -17,6 +24,17 @@ class ChatSession(models.Model):
     )
 
     agent_needed = models.BooleanField(default=False)
+
+    # Anonymous visitors have no account, so this is the only thing that proves
+    # a browser owns this conversation. Issued when the session is created and
+    # required to read its history over HTTP; without it, session ids are
+    # sequential integers and one visitor could read another's chat.
+    public_token = models.CharField(
+        max_length=64,
+        unique=True,
+        default=new_public_token,
+        editable=False,
+    )
 
     agent = models.ForeignKey(
         User,

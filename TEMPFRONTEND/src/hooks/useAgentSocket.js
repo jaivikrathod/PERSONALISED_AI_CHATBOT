@@ -2,6 +2,7 @@ import { useCallback, useEffect } from 'react'
 import { useDispatch } from 'react-redux'
 import useWebSocket from './useWebSocket'
 import { WS_BASE_URL } from '../utils/constants'
+import { tokenStore } from '../utils/storage'
 import {
   chatAssigned,
   chatClosedReceived,
@@ -13,7 +14,11 @@ import {
 } from '../redux/slices/agentChatSlice'
 
 /**
- * Owns the `ws/agent/?agent_id=` connection for the agent console.
+ * Owns the `ws/agent/?token=` connection for the agent console.
+ *
+ * The socket authenticates with the same bearer token as the REST calls — the
+ * server resolves the agent from it, so there is no id to pass and no way to
+ * subscribe to somebody else's inbox.
  *
  *   in:  connected | chats | chat_assigned | history | chat_message |
  *        chat_closed | error
@@ -22,8 +27,9 @@ import {
  * Sending returns false when the socket is down so the caller can retry the
  * equivalent REST endpoint.
  */
-export default function useAgentSocket(agentId, { enabled = true } = {}) {
+export default function useAgentSocket({ enabled = true } = {}) {
   const dispatch = useDispatch()
+  const token = tokenStore.get()
 
   const handleMessage = useCallback(
     (data) => {
@@ -66,8 +72,8 @@ export default function useAgentSocket(agentId, { enabled = true } = {}) {
   )
 
   const { status, send } = useWebSocket(
-    agentId ? `${WS_BASE_URL}/ws/agent/?agent_id=${agentId}` : null,
-    { enabled: enabled && Boolean(agentId), onMessage: handleMessage },
+    token ? `${WS_BASE_URL}/ws/agent/?token=${encodeURIComponent(token)}` : null,
+    { enabled: enabled && Boolean(token), onMessage: handleMessage },
   )
 
   useEffect(() => {

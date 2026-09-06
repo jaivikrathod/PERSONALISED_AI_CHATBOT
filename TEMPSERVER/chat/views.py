@@ -1,8 +1,10 @@
 from django.utils import timezone
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from company.models import Company
+from users.permissions import IsAdminOrManager, IsAgent
 
 from .models import ChatMessage, ChatSession
 from .serializers import (
@@ -31,6 +33,9 @@ class ChatWidgetConfigView(APIView):
     details on the Company record.
     """
 
+    authentication_classes: list = []
+    permission_classes = [AllowAny]
+
     def get(self, request):
         company_id = request.query_params.get("company_id")
         if not company_id:
@@ -44,44 +49,37 @@ class ChatWidgetConfigView(APIView):
 
 
 class ChatHistoryView(APIView):
+    """GET /api/chat/history/?session_id=<id>&token=<public_token>
+
+    The public widget replaying its own conversation after a reload. Session ids
+    are sequential, so the id alone proves nothing: the caller must present the
+    session's `public_token`, which only the browser that started the chat was
+    ever given.
+    """
+
+    authentication_classes: list = []
+    permission_classes = [AllowAny]
+
     def get(self, request):
         session_id = request.query_params.get("session_id")
-        company_id = request.query_params.get("company_id")
-        customer_user_id = request.query_params.get("customer_user_id")
+        token = request.query_params.get("token")
 
         if not session_id:
             return Response({"detail": "session_id is required."}, status=400)
+        if not token:
+            return Response({"detail": "token is required."}, status=400)
 
-        queryset = ChatSession.objects.prefetch_related("messages").filter(id=session_id)
-        if company_id is not None:
-            queryset = queryset.filter(company_id=company_id)
-        if customer_user_id is not None:
-            queryset = queryset.filter(messages__customer_user_id=customer_user_id)
-
-        session = queryset.first()
+        session = (
+            ChatSession.objects.prefetch_related("messages")
+            .filter(id=session_id, public_token=token)
+            .first()
+        )
+        # One message for "no such session" and "wrong token" so the endpoint
+        # cannot be used to test which session ids exist.
         if not session:
             return Response({"detail": "Chat session not found."}, status=404)
 
         return Response(ChatSessionSerializer(session).data)
-
-
-class ChatSessionListView(APIView):
-    def get(self, request):
-        company_id = request.query_params.get("company_id")
-        customer_user_id = request.query_params.get("customer_user_id")
-
-        if not company_id:
-            return Response({"detail": "company_id is required."}, status=400)
-        if not customer_user_id:
-            return Response({"detail": "customer_user_id is required."}, status=400)
-
-        sessions = with_last_message(
-            ChatSession.objects.filter(
-                company_id=company_id,
-                messages__customer_user_id=customer_user_id,
-            )
-        )
-        return Response(ChatSessionListSerializer(sessions, many=True).data)
 
 
 class AssignAgentView(APIView):
@@ -94,12 +92,17 @@ class AssignAgentView(APIView):
     Body: {"session_id": <int>}
     """
 
+    permission_classes = [IsAdminOrManager]
+
     def post(self, request):
         session_id = request.data.get("session_id")
         if not session_id:
             return Response({"detail": "session_id is required."}, status=400)
 
-        session = ChatSession.objects.filter(id=session_id).first()
+        session = ChatSession.objects.filter(
+            id=session_id,
+            company_id=request.user.company_id,
+        ).first()
         if session is None:
             return Response({"detail": "Chat session not found."}, status=404)
 
@@ -124,36 +127,39 @@ class AssignAgentView(APIView):
         return Response(ChatSessionSerializer(session).data)
 
 
+# ---------------------------------------------------------------------------
+# Agent console. `agent_id` used to arrive in the request; it now comes from
+# the bearer token, so an agent can only ever act as themselves.
+# ---------------------------------------------------------------------------
 class AgentChatListView(APIView):
-    """GET /api/agent/chats/?agent_id=<id>  -> chats assigned to this agent."""
+    """GET /api/agent/chats/  -> chats assigned to the calling agent."""
+
+    permission_classes = [IsAgent]
 
     def get(self, request):
-        agent_id = request.query_params.get("agent_id")
-        if not agent_id:
-            return Response({"detail": "agent_id is required."}, status=400)
-
-        sessions = with_last_message(ChatSession.objects.filter(agent_id=agent_id))
+        sessions = with_last_message(
+            ChatSession.objects.filter(agent_id=request.user.id)
+        )
         return Response(ChatSessionListSerializer(sessions, many=True).data)
 
 
 class AgentChatHistoryView(APIView):
-    """GET /api/agent/chats/history/?agent_id=<id>&session_id=<id>
+    """GET /api/agent/chats/history/?session_id=<id>
 
-    Full message history of one session, scoped to the agent it is assigned to
-    so an agent can only read their own conversations.
+    Full message history of one session, scoped to the calling agent so an agent
+    can only read their own conversations.
     """
 
+    permission_classes = [IsAgent]
+
     def get(self, request):
-        agent_id = request.query_params.get("agent_id")
         session_id = request.query_params.get("session_id")
-        if not agent_id:
-            return Response({"detail": "agent_id is required."}, status=400)
         if not session_id:
             return Response({"detail": "session_id is required."}, status=400)
 
         session = (
             ChatSession.objects.prefetch_related("messages")
-            .filter(id=session_id, agent_id=agent_id)
+            .filter(id=session_id, agent_id=request.user.id)
             .first()
         )
         if not session:
@@ -165,19 +171,19 @@ class AgentChatHistoryView(APIView):
 class AgentSendMessageView(APIView):
     """POST /api/agent/chats/send/  -> agent replies directly to the client.
 
-    Body: {"agent_id": <int>, "session_id": <int>, "message": <str>}
+    Body: {"session_id": <int>, "message": <str>}
     Only the agent assigned to the session may post into it. The reply is also
     pushed onto the session's channel group so the customer widget shows it
     without a refresh (same path the agent socket uses).
     """
 
+    permission_classes = [IsAgent]
+
     def post(self, request):
-        agent_id = request.data.get("agent_id")
+        agent_id = request.user.id
         session_id = request.data.get("session_id")
         message = (request.data.get("message") or "").strip()
 
-        if not agent_id:
-            return Response({"detail": "agent_id is required."}, status=400)
         if not session_id:
             return Response({"detail": "session_id is required."}, status=400)
         if not message:
@@ -220,17 +226,17 @@ class AgentSendMessageView(APIView):
 class AgentCloseChatView(APIView):
     """POST /api/agent/chats/close/  -> agent finishes a conversation.
 
-    Body: {"agent_id": <int>, "session_id": <int>}
+    Body: {"session_id": <int>}
     Closing is what frees the agent again: `pick_free_agent` only skips agents
     sitting on open / in-progress sessions.
     """
 
+    permission_classes = [IsAgent]
+
     def post(self, request):
-        agent_id = request.data.get("agent_id")
+        agent_id = request.user.id
         session_id = request.data.get("session_id")
 
-        if not agent_id:
-            return Response({"detail": "agent_id is required."}, status=400)
         if not session_id:
             return Response({"detail": "session_id is required."}, status=400)
 

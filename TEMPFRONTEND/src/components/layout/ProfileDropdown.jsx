@@ -8,7 +8,7 @@ import {
 import Dropdown from '../ui/Dropdown'
 import Avatar from '../ui/Avatar'
 import useAuth from '../../hooks/useAuth'
-import { logout } from '../../redux/slices/authSlice'
+import { logoutUser } from '../../redux/slices/authSlice'
 
 export default function ProfileDropdown() {
   const { user, userType } = useAuth()
@@ -18,7 +18,7 @@ export default function ProfileDropdown() {
   const name = user?.name || user?.email || 'User'
 
   const handleLogout = () => {
-    dispatch(logout())
+    dispatch(logoutUser())
     navigate('/login', { replace: true })
   }
 

@@ -26,9 +26,9 @@ const makeMessage = ({ role, text, isError = false, sender = null }) => ({
 
 export const fetchHistory = createAsyncThunk(
   'customerChat/fetchHistory',
-  async ({ sessionId, companyId }, { rejectWithValue }) => {
+  async ({ sessionId, token }, { rejectWithValue }) => {
     try {
-      return await chatbotService.getHistory({ sessionId, companyId })
+      return await chatbotService.getHistory({ sessionId, token })
     } catch (err) {
       return rejectWithValue(err.message || 'Failed to load the conversation.')
     }
@@ -37,6 +37,8 @@ export const fetchHistory = createAsyncThunk(
 
 const initialState = {
   activeSessionId: null,
+  // Proof this browser owns the conversation; required to replay its history.
+  sessionToken: null,
   messages: [],
   socketStatus: SOCKET_STATUS.CONNECTING,
   waiting: false,
@@ -64,12 +66,15 @@ const customerChatSlice = createSlice({
 
     /**
      * The server told us which session this conversation belongs to — either
-     * the one we resumed from localStorage or a freshly created one.
+     * the one we resumed from localStorage or a freshly created one. The token
+     * arrives with it and is what `/chat/history/` checks on a later reload.
      */
     sessionEstablished(state, { payload }) {
-      if (payload && payload !== state.activeSessionId) {
-        state.activeSessionId = payload
+      const { sessionId, token } = payload || {}
+      if (sessionId && sessionId !== state.activeSessionId) {
+        state.activeSessionId = sessionId
       }
+      if (token) state.sessionToken = token
     },
 
     /** `{ type: "error" }` — surfaced as a red bubble in the thread. */
@@ -102,6 +107,7 @@ const customerChatSlice = createSlice({
       state.waiting = false
       state.agentHandling = false
       state.activeSessionId = null
+      state.sessionToken = null
       state.closed = true
       state.messages.push(
         makeMessage({
@@ -168,6 +174,7 @@ const customerChatSlice = createSlice({
         // fall back to a clean slate rather than an empty broken thread.
         state.loadingMessages = false
         state.activeSessionId = null
+        state.sessionToken = null
         state.messages = []
       })
   },

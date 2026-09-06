@@ -4,6 +4,9 @@ from rest_framework import status, viewsets, mixins
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from config.tenancy import CompanyScopedQuerysetMixin, assert_own_company
+from users.permissions import IsAdminOrManager
+
 from .models import VectorJob
 from .serializers import VectorJobSerializer
 from .services import CompanyNotFound, vectorize_company
@@ -23,7 +26,12 @@ class VectorizeCompanyView(APIView):
     this endpoint's contract (Part 10).
     """
 
+    permission_classes = [IsAdminOrManager]
+
     def post(self, request, company_id: int):
+        # The id in the path is only allowed to name the caller's own company.
+        assert_own_company(request, company_id)
+
         try:
             result = vectorize_company(company_id)
         except CompanyNotFound:
@@ -58,6 +66,7 @@ class VectorizeCompanyView(APIView):
 
 
 class VectorJobViewSet(
+    CompanyScopedQuerysetMixin,
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
     viewsets.GenericViewSet,
@@ -68,11 +77,6 @@ class VectorJobViewSet(
     GET /api/vector-jobs/{id}/      -> retrieve one job
     """
 
+    queryset = VectorJob.objects.select_related("company").all()
     serializer_class = VectorJobSerializer
-
-    def get_queryset(self):
-        queryset = VectorJob.objects.select_related("company").all()
-        company_id = self.request.query_params.get("company_id")
-        if company_id is not None:
-            queryset = queryset.filter(company_id=company_id)
-        return queryset
+    permission_classes = [IsAdminOrManager]

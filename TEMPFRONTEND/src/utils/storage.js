@@ -38,9 +38,18 @@ export const storage = {
 }
 
 /**
- * Persists the logged-in user. There is no JWT in this app — the backend
- * login endpoint returns the user profile, which we store to gate the UI.
- * Swap this for token storage when real auth is added.
+ * The bearer token issued by `POST /auth/login/`. This is what actually grants
+ * access — every API call carries it, and clearing it ends the session.
+ */
+export const tokenStore = {
+  get: () => storage.get(STORAGE_KEYS.TOKEN),
+  set: (token) => storage.set(STORAGE_KEYS.TOKEN, token),
+  clear: () => storage.remove(STORAGE_KEYS.TOKEN),
+}
+
+/**
+ * Cached profile for the signed-in user. Display only — the token above is the
+ * credential, and `GET /auth/me/` is the authority on who the user is.
  */
 export const userStore = {
   get: () => storage.getJSON(STORAGE_KEYS.USER),
@@ -48,8 +57,8 @@ export const userStore = {
   clear: () => storage.remove(STORAGE_KEYS.USER),
 }
 
-export const chatSessionStore = {
-  get: () => storage.get(STORAGE_KEYS.CHAT_SESSION_ID),
-  set: (sessionId) => storage.set(STORAGE_KEYS.CHAT_SESSION_ID, String(sessionId)),
-  clear: () => storage.remove(STORAGE_KEYS.CHAT_SESSION_ID),
+/** Clears everything that identifies the current session. */
+export const clearSession = () => {
+  tokenStore.clear()
+  userStore.clear()
 }

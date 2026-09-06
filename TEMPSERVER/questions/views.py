@@ -2,35 +2,26 @@ from rest_framework import viewsets, mixins, filters, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from vector_question.services import _build_text, generate_embedding
+from config.tenancy import CompanyScopedQuerysetMixin
+from users.permissions import IsAdminOrManager
+from vector_question.services import build_retrieval_text, generate_embedding
 
 from .models import Question, UnansweredMessage
 from .serializers import QuestionSerializer, UnansweredMessageSerializer
 
 
-class QuestionViewSet(viewsets.ModelViewSet):
+class QuestionViewSet(CompanyScopedQuerysetMixin, viewsets.ModelViewSet):
+    """Knowledge-base CRUD, scoped to the caller's company."""
 
+    queryset = Question.objects.select_related("company").filter(is_archived=False)
     serializer_class = QuestionSerializer
+    permission_classes = [IsAdminOrManager]
 
     # Enable DRF search/ordering. `search_fields` powers ?search=.
     filter_backends = [filters.SearchFilter, filters.OrderingFilter]
     search_fields = ["question"]
     ordering_fields = ["created_at", "updated_at"]
     ordering = ["-created_at"]
-
-    def get_queryset(self):
-
-        queryset = (
-            Question.objects.select_related("company")
-            .filter(is_archived=False)
-        )
-
-        # Optional ?company_id=<id> filter.
-        company_id = self.request.query_params.get("company_id")
-        if company_id is not None:
-            queryset = queryset.filter(company_id=company_id)
-
-        return queryset
 
     def destroy(self, request, *args, **kwargs):
         """Soft delete: mark the record archived instead of removing it.
@@ -48,6 +39,7 @@ class QuestionViewSet(viewsets.ModelViewSet):
 
 
 class UnansweredMessageViewSet(
+    CompanyScopedQuerysetMixin,
     mixins.ListModelMixin,
     mixins.DestroyModelMixin,
     viewsets.GenericViewSet,
@@ -59,14 +51,9 @@ class UnansweredMessageViewSet(
     DELETE /api/unanswered-messages/{id}/             -> dismiss without answering
     """
 
+    queryset = UnansweredMessage.objects.select_related("company").all()
     serializer_class = UnansweredMessageSerializer
-
-    def get_queryset(self):
-        queryset = UnansweredMessage.objects.select_related("company").all()
-        company_id = self.request.query_params.get("company_id")
-        if company_id is not None:
-            queryset = queryset.filter(company_id=company_id)
-        return queryset
+    permission_classes = [IsAdminOrManager]
 
     @action(detail=True, methods=["post"])
     def resolve(self, request, pk=None):
@@ -95,7 +82,7 @@ class UnansweredMessageViewSet(
         # Vectorize this single question right away so it can immediately serve
         # future chats, then drop it from the unanswered inbox.
         try:
-            embedding = generate_embedding(_build_text(question.question, question.answer))
+            embedding = generate_embedding(build_retrieval_text(question.question))
         except Exception:  # noqa: BLE001 - surface a clean error, keep the inbox row
             question.delete()
             return Response(

@@ -3,13 +3,15 @@ import { STORAGE_KEYS } from './constants'
 /**
  * localStorage helpers for the public chat widget (`/chat/:companyId`).
  *
- * Visitors there are anonymous — there is no account and no token — so the
- * only thing tying a returning browser back to its conversation is the session
- * id the server handed out on the first message. It is scoped per company so
- * one browser can talk to several companies' widgets independently.
+ * Visitors there are anonymous, so the only thing tying a returning browser
+ * back to its conversation is the (id, token) pair the server hands out on the
+ * first message. Session ids are sequential, so the id alone proves nothing —
+ * the token is what `/api/chat/history/` actually checks. Both are scoped per
+ * company so one browser can talk to several companies' widgets independently.
  */
 
 const sessionKey = (companyId) => `${STORAGE_KEYS.CHAT_SESSION_ID}:${companyId}`
+const tokenKey = (companyId) => `${STORAGE_KEYS.CHAT_SESSION_ID}:${companyId}:token`
 
 /** Reads a value, tolerating disabled/full storage (private mode, quotas). */
 const read = (key) => {
@@ -38,7 +40,15 @@ export const getStoredSessionId = (companyId) => {
 export const storeSessionId = (companyId, sessionId) =>
   write(sessionKey(companyId), sessionId)
 
-export const clearStoredSessionId = (companyId) => write(sessionKey(companyId), null)
+export const getStoredSessionToken = (companyId) => read(tokenKey(companyId))
+
+export const storeSessionToken = (companyId, token) =>
+  write(tokenKey(companyId), token)
+
+export const clearStoredSession = (companyId) => {
+  write(sessionKey(companyId), null)
+  write(tokenKey(companyId), null)
+}
 
 /** Optional name/email the visitor gave on the pre-chat form. */
 export const getStoredGuest = () => {

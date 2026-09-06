@@ -1,7 +1,10 @@
 """WebSocket consumer for the human-agent console.
 
-An agent connects to ``ws/agent/?agent_id=<id>`` and joins their personal
-group. From then on they receive:
+An agent connects to ``ws/agent/?token=<bearer token>`` and joins their personal
+group. The identity comes from the token, never from an id in the query string:
+the previous ``?agent_id=`` form let anyone read any agent's inbox.
+
+From then on they receive:
 
   * ``chat_assigned``  - a session the bot could not answer was handed to them;
   * ``chat_message``   - a new message inside one of their sessions;
@@ -20,7 +23,7 @@ from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
 from django.utils import timezone
 
-from users.models import User
+from users.models import AuthToken, User, hash_token
 
 from .models import ChatMessage, ChatSession
 from .serializers import ChatMessageSerializer, ChatSessionListSerializer
@@ -39,11 +42,11 @@ logger = logging.getLogger(__name__)
 class AgentConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         params = parse_qs(self.scope.get("query_string", b"").decode())
-        agent_id = (params.get("agent_id") or [None])[0]
+        token = (params.get("token") or [None])[0]
 
-        agent = await self._get_agent(agent_id)
+        agent = await self._get_agent(token)
         if agent is None:
-            # 4001: not an active Agent-type user -> nothing to subscribe to.
+            # 4001: bad/expired token, or not an active Agent-type user.
             await self.close(code=4001)
             return
 
@@ -184,17 +187,27 @@ class AgentConsumer(AsyncWebsocketConsumer):
         await self._send_json({"type": "error", "error": error})
 
     @database_sync_to_async
-    def _get_agent(self, agent_id):
-        if not agent_id:
+    def _get_agent(self, raw_token):
+        """Resolve a bearer token to an active Agent, or None."""
+        if not raw_token:
             return None
-        agent = User.objects.filter(
-            id=agent_id,
-            type=User.Type.AGENT,
-            active=True,
-            is_archived=False,
-        ).first()
-        if agent is None:
+
+        auth = (
+            AuthToken.objects.select_related("user")
+            .filter(key_hash=hash_token(raw_token))
+            .first()
+        )
+        if auth is None or auth.is_expired:
             return None
+
+        agent = auth.user
+        if (
+            agent.type != User.Type.AGENT
+            or not agent.active
+            or agent.is_archived
+        ):
+            return None
+
         return {"id": agent.id, "name": agent.name, "company_id": agent.company_id}
 
     @database_sync_to_async

@@ -14,6 +14,7 @@ import { Button, Input, Select } from '../../components/ui'
 import AuthLayout from './AuthLayout'
 import useAuth from '../../hooks/useAuth'
 import { clearAuthError, register as registerCompany } from '../../redux/slices/authSlice'
+import { homePathForType } from '../../routes/navigation'
 import { GENDER_OPTIONS } from '../../utils/constants'
 
 function Section({ title, children }) {
@@ -64,11 +65,9 @@ export default function RegisterPage() {
     )
 
     if (registerCompany.fulfilled.match(result)) {
-      // Send the new admin to the login screen with a success hint.
-      navigate('/login', {
-        state: { registered: true, email: values.admin_email },
-        replace: true,
-      })
+      // Registration issues a session, so the new Admin is already signed in —
+      // bouncing them through /login would only redirect straight back out.
+      navigate(homePathForType(result.payload?.type), { replace: true })
     }
   }
 

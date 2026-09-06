@@ -18,11 +18,13 @@ import useCustomerChatSocket from '../../hooks/useCustomerChatSocket'
 import chatbotService from '../../services/chatbotService'
 import { SOCKET_STATUS } from '../../utils/constants'
 import {
-  clearStoredSessionId,
+  clearStoredSession,
   getStoredGuest,
   getStoredSessionId,
+  getStoredSessionToken,
   storeGuest,
   storeSessionId,
+  storeSessionToken,
 } from '../../utils/guestChat'
 import {
   fetchHistory,
@@ -58,6 +60,7 @@ export default function PublicChatPage() {
 
   const {
     activeSessionId,
+    sessionToken,
     messages,
     socketStatus,
     waiting,
@@ -87,10 +90,16 @@ export default function PublicChatPage() {
         setConfig({ state: 'ready', name: data.company_name })
 
         const storedSessionId = getStoredSessionId(companyId)
+        const storedToken = getStoredSessionToken(companyId)
         const storedGuest = getStoredGuest()
         // A visitor who already has a thread here skips the pre-chat form.
         if (storedSessionId || storedGuest) setGuest(storedGuest || {})
-        if (storedSessionId) dispatch(sessionEstablished(storedSessionId))
+        // Both halves are needed: an id without its token cannot be replayed.
+        if (storedSessionId && storedToken) {
+          dispatch(
+            sessionEstablished({ sessionId: storedSessionId, token: storedToken }),
+          )
+        }
       })
       .catch(() => {
         if (!cancelled) setConfig({ state: 'missing', name: '' })
@@ -104,14 +113,17 @@ export default function PublicChatPage() {
 
   // Replay the conversation whenever we (re)attach to a session.
   useEffect(() => {
-    if (activeSessionId) dispatch(fetchHistory({ sessionId: activeSessionId, companyId }))
-  }, [dispatch, activeSessionId, companyId])
+    if (activeSessionId && sessionToken) {
+      dispatch(fetchHistory({ sessionId: activeSessionId, token: sessionToken }))
+    }
+  }, [dispatch, activeSessionId, sessionToken])
 
   // Keep localStorage in step so a reload lands back in the same thread.
   useEffect(() => {
     if (activeSessionId) storeSessionId(companyId, activeSessionId)
-    else clearStoredSessionId(companyId)
-  }, [companyId, activeSessionId])
+    if (sessionToken) storeSessionToken(companyId, sessionToken)
+    if (!activeSessionId) clearStoredSession(companyId)
+  }, [companyId, activeSessionId, sessionToken])
 
   const handleStart = useCallback((details) => {
     storeGuest(details)
@@ -119,7 +131,7 @@ export default function PublicChatPage() {
   }, [])
 
   const handleNewChat = useCallback(() => {
-    clearStoredSessionId(companyId)
+    clearStoredSession(companyId)
     dispatch(startNewChat())
   }, [dispatch, companyId])
 

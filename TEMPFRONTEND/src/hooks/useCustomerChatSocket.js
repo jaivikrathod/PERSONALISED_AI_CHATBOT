@@ -44,8 +44,16 @@ export default function useCustomerChatSocket({
   const handleMessage = useCallback(
     (data) => {
       // Every server frame that knows the session carries it; the first message
-      // of a conversation is what creates it server-side.
-      if (data.session_id) dispatch(sessionEstablished(data.session_id))
+      // of a conversation is what creates it server-side. `session_token` comes
+      // with it so a later reload can prove this browser owns the chat.
+      if (data.session_id) {
+        dispatch(
+          sessionEstablished({
+            sessionId: data.session_id,
+            token: data.session_token,
+          }),
+        )
+      }
 
       switch (data.type) {
         case 'error':

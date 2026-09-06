@@ -13,12 +13,13 @@ export const chatbotService = {
     return data
   },
 
-  async getHistory({ sessionId, companyId }) {
+  /**
+   * Replay one conversation. The session's `token` is required: without it a
+   * visitor could read any other visitor's chat by guessing a session id.
+   */
+  async getHistory({ sessionId, token }) {
     const { data } = await api.get('/chat/history/', {
-      params: {
-        session_id: sessionId,
-        company_id: companyId,
-      },
+      params: { session_id: sessionId, token },
     })
     return data
   },

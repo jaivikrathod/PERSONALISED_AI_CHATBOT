@@ -1,4 +1,9 @@
+import hashlib
+import secrets
+from datetime import timedelta
+
 from django.db import models
+from django.utils import timezone
 
 from company.models import Company
 
@@ -70,3 +75,74 @@ class User(models.Model):
         from django.contrib.auth.hashers import check_password
 
         return check_password(raw_password, self.password)
+
+    # --- DRF integration ----------------------------------------------------
+    # `request.user` is expected to answer these; the standalone model is not a
+    # `django.contrib.auth` user, so they are declared explicitly. Permission
+    # classes rely on `is_authenticated` to tell a real user from AnonymousUser.
+    @property
+    def is_authenticated(self):
+        return True
+
+    @property
+    def is_anonymous(self):
+        return False
+
+
+# How long a token stays valid. Refreshed only by re-login, not by use.
+TOKEN_TTL = timedelta(days=14)
+
+
+def hash_token(raw: str) -> str:
+    """SHA-256 of a raw token. The digest is all that is ever stored."""
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+class AuthToken(models.Model):
+    """One live session for a user.
+
+    `key_hash` is the lookup column — the raw token never touches the database,
+    so a leaked dump cannot be replayed as a set of live sessions.
+    """
+
+    id = models.AutoField(primary_key=True)
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="auth_tokens",
+    )
+
+    key_hash = models.CharField(max_length=64, unique=True, db_index=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    expires_at = models.DateTimeField()
+    last_used_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "auth_tokens"
+        ordering = ("-created_at",)
+
+    def __str__(self):
+        return f"Token for user {self.user_id}"
+
+    @property
+    def is_expired(self) -> bool:
+        return self.expires_at <= timezone.now()
+
+    @classmethod
+    def issue(cls, user) -> tuple["AuthToken", str]:
+        """Create a token for `user`. Returns (row, raw token — shown once)."""
+        raw = secrets.token_urlsafe(32)
+        token = cls.objects.create(
+            user=user,
+            key_hash=hash_token(raw),
+            expires_at=timezone.now() + TOKEN_TTL,
+        )
+        return token, raw
+
+    @classmethod
+    def purge_expired(cls) -> int:
+        deleted, _ = cls.objects.filter(expires_at__lte=timezone.now()).delete()
+        return deleted
+

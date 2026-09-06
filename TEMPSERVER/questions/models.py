@@ -1,6 +1,11 @@
 from django.db import models
+from pgvector.django import HnswIndex, VectorField
 
 from company.models import Company
+
+# all-MiniLM-L6-v2 output width. Changing the embedding model changes this
+# column's type, so a swap is a migration, not a config flip.
+EMBEDDING_DIMENSIONS = 384
 
 
 class Question(models.Model):
@@ -22,10 +27,11 @@ class Question(models.Model):
 
     # --- Vectorization state ------------------------------------------------
     # `is_vectorized` says whether the embedding has been generated.
-    # `embedding` stores the vector itself (a list of floats) right here on the
-    # row, so there is no separate vector store to keep in sync.
+    # `embedding` is a real pgvector column, not JSON: that is what lets the
+    # similarity search run as an indexed query instead of a Python loop over
+    # every row in the table.
     is_vectorized = models.BooleanField(default=False)
-    embedding = models.JSONField(blank=True, null=True)
+    embedding = VectorField(dimensions=EMBEDDING_DIMENSIONS, blank=True, null=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -33,6 +39,22 @@ class Question(models.Model):
     class Meta:
         db_table = "questions"
         ordering = ("-created_at",)
+        indexes = [
+            # Cosine HNSW: embeddings are normalized at generation time, so
+            # cosine and inner product rank identically — cosine is kept
+            # because the stored scores are read by humans in the logs.
+            HnswIndex(
+                name="questions_embedding_hnsw",
+                fields=["embedding"],
+                m=16,
+                ef_construction=64,
+                opclasses=["vector_cosine_ops"],
+            ),
+            models.Index(
+                fields=["company", "is_archived", "is_vectorized"],
+                name="questions_company_state_idx",
+            ),
+        ]
 
     def __str__(self):
         return self.question[:50]

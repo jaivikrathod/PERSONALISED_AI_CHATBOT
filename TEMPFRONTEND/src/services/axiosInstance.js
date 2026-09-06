@@ -1,15 +1,28 @@
 import axios from 'axios'
 import { API_BASE_URL } from '../utils/constants'
+import { clearSession, tokenStore } from '../utils/storage'
 
 /**
  * Central axios instance for all API calls.
- * The backend endpoints are currently open (no auth token required), so this
- * is intentionally simple: a base URL + JSON headers + error normalization.
+ *
+ * The API is closed by default: every endpoint except registration, login and
+ * the public chat widget requires the bearer token issued at login, which the
+ * request interceptor below attaches to every call.
  */
 const axiosInstance = axios.create({
   baseURL: API_BASE_URL,
   headers: { 'Content-Type': 'application/json' },
   timeout: 30000,
+})
+
+// Read the token per request rather than capturing it once: login, logout and
+// expiry all change it while the module stays loaded.
+axiosInstance.interceptors.request.use((config) => {
+  const token = tokenStore.get()
+  if (token && !config.skipAuth) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
 })
 
 // Flatten a DRF / axios error into a single readable message.
@@ -38,10 +51,22 @@ export function normalizeError(error) {
   return { message, status: error.response?.status, data }
 }
 
-// Reject with a normalized error so callers get a consistent { message } shape.
 axiosInstance.interceptors.response.use(
   (response) => response,
-  (error) => Promise.reject(normalizeError(error)),
+  (error) => {
+    // An expired or revoked token can't be recovered from in-page. Drop the
+    // stale session and send the user to login, preserving where they were.
+    // The public chat widget is unauthenticated, so it is left alone.
+    const isAuthCall = error.config?.skipAuth
+    const onPublicChat = window.location.pathname.startsWith('/chat/')
+    if (error.response?.status === 401 && !isAuthCall && !onPublicChat) {
+      clearSession()
+      if (window.location.pathname !== '/login') {
+        window.location.assign('/login')
+      }
+    }
+    return Promise.reject(normalizeError(error))
+  },
 )
 
 export default axiosInstance

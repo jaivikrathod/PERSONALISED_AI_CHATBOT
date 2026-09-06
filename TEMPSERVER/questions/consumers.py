@@ -9,7 +9,6 @@ For each user message we:
 
 import json
 import logging
-import math
 
 from asgiref.sync import sync_to_async
 from channels.db import database_sync_to_async
@@ -26,7 +25,14 @@ from chat.services import (
     session_event,
     session_group,
 )
-from vector_question.services import LLMError, generate_answer, generate_embedding
+from pgvector.django import CosineDistance
+
+from vector_question.services import (
+    LLMError,
+    build_retrieval_text,
+    generate_answer,
+    generate_embedding,
+)
 
 from .models import Question, UnansweredMessage
 
@@ -40,17 +46,6 @@ AGENT_HANDOFF_MESSAGE = (
     "I'm not able to answer that from our FAQ right now. "
     "Let me connect you with one of our support agents who'll help you shortly."
 )
-
-
-def _cosine_similarity(a, b):
-    if not a or not b or len(a) != len(b):
-        return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
-    norm_a = math.sqrt(sum(x * x for x in a))
-    norm_b = math.sqrt(sum(x * x for x in b))
-    if norm_a == 0 or norm_b == 0:
-        return 0.0
-    return dot / (norm_a * norm_b)
 
 
 class ChatConsumer(AsyncWebsocketConsumer):
@@ -91,6 +86,12 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         session = await self._get_or_create_session(session_id, company_id)
         await self._join_session_group(session.id)
+        # The widget stores this and presents it to /api/chat/history/; it is
+        # the only proof an anonymous browser owns this conversation.
+        session_ref = {
+            "session_id": session.id,
+            "session_token": session.public_token,
+        }
         stored = await self._store_message(
             session=session,
             company_id=company_id,
@@ -114,7 +115,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 json.dumps(
                     {
                         "type": "delivered",
-                        "session_id": session.id,
+                        **session_ref,
                         "agent_needed": True,
                         "agent_handling": True,
                     }
@@ -154,7 +155,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                         "is_answer_found": False,
                         "agent_needed": True,
                         "sources": [],
-                        "session_id": session.id,
+                        **session_ref,
                     }
                 )
             )
@@ -190,7 +191,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                         "is_answer_found": False,
                         "agent_needed": True,
                         "sources": [],
-                        "session_id": session.id,
+                        **session_ref,
                     }
                 )
             )
@@ -240,7 +241,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                         {"question": question, "score": round(score, 4)}
                         for score, question, _ in matches
                     ],
-                    "session_id": session.id,
+                    **session_ref,
                 }
             )
         )
@@ -365,23 +366,29 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def _top_matches(self, message, company_id):
-        query_embedding = generate_embedding(message)
+        """Top-K nearest FAQ rows for `message`, as (score, question, answer).
 
-        queryset = Question.objects.filter(is_archived=False, is_vectorized=True)
+        The ordering and the limit are both done by Postgres against the HNSW
+        index on `questions.embedding`. The previous implementation pulled every
+        vectorized row into Python and scored it in a loop, which cost roughly
+        `rows x 384` interpreted float operations on every single message.
+        """
+        query_embedding = generate_embedding(build_retrieval_text(message))
+
+        queryset = Question.objects.filter(
+            is_archived=False,
+            is_vectorized=True,
+            embedding__isnull=False,
+        )
         if company_id is not None:
             queryset = queryset.filter(company_id=company_id)
 
-        scored = []
-        for row in queryset.only("id", "question", "answer", "embedding").iterator():
-            if not row.embedding:
-                continue
-            scored.append(
-                (
-                    _cosine_similarity(query_embedding, row.embedding),
-                    row.question,
-                    row.answer,
-                )
-            )
+        rows = (
+            queryset.annotate(distance=CosineDistance("embedding", query_embedding))
+            .order_by("distance")
+            .values_list("distance", "question", "answer")[:TOP_K]
+        )
 
-        scored.sort(key=lambda pair: pair[0], reverse=True)
-        return scored[:TOP_K]
+        # pgvector returns cosine *distance* (0 = identical); the rest of the
+        # pipeline and the configured threshold are in similarity terms.
+        return [(1.0 - float(distance), question, answer) for distance, question, answer in rows]

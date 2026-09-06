@@ -11,9 +11,12 @@ django-cors-headers>=4.4
 # WebSockets (chatbot socket between the React client and Django)
 channels>=4
 daphne>=4
+# Redis channel layer - required for more than one worker process
+channels-redis>=4.2
 
-# Database (PostgreSQL)
+# Database (PostgreSQL) + pgvector for indexed similarity search
 psycopg2-binary>=2.9
+pgvector>=0.3
 
 # Config (.env loading)
 python-dotenv>=1.0

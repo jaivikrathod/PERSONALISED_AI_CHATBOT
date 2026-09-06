@@ -204,8 +204,19 @@ def delete_vector(vector_id: str) -> bool:
         return False
 
 
-def _build_text(question: str, answer: str) -> str:
-    return f"Question:\n{question}\n\nAnswer:\n{answer}"
+def build_retrieval_text(question: str) -> str:
+    """Text that gets embedded for a knowledge row.
+
+    The index text must match the *shape* of what is searched with it. Queries
+    are bare customer questions, so rows are indexed as bare questions too. The
+    previous "Question: ... Answer: ..." block embedded a different kind of
+    object than the query, which dragged every similarity score down and made
+    the confidence threshold impossible to calibrate.
+
+    The answer is still handed to the model as context — it is just not part of
+    what the query is compared against.
+    """
+    return (question or "").strip()
 
 
 def vectorize_company(company_id: int) -> dict[str, Any]:
@@ -245,8 +256,7 @@ def vectorize_company(company_id: int) -> dict[str, Any]:
 
     for question in pending_qs.iterator():
         try:
-            text = _build_text(question.question, question.answer)
-            embedding = generate_embedding(text)
+            embedding = generate_embedding(build_retrieval_text(question.question))
 
             with transaction.atomic():
                 question.embedding = embedding
