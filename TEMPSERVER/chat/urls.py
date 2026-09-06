@@ -8,9 +8,12 @@ from .views import (
     AssignAgentView,
     ChatHistoryView,
     ChatSessionListView,
+    ChatWidgetConfigView,
 )
 
 urlpatterns = [
+    # Public widget (anonymous visitors).
+    path("chat/widget/", ChatWidgetConfigView.as_view(), name="chat-widget-config"),
     path("chat/sessions/", ChatSessionListView.as_view(), name="chat-sessions"),
     path("chat/history/", ChatHistoryView.as_view(), name="chat-history"),
     path("chat/sessions/assign/", AssignAgentView.as_view(), name="chat-assign-agent"),

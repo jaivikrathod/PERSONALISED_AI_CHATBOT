@@ -1,6 +1,5 @@
 import {
   BookOpenIcon,
-  ChatBubbleLeftRightIcon,
   QuestionMarkCircleIcon,
   UserGroupIcon,
   UsersIcon,
@@ -37,11 +36,6 @@ export const NAV_ITEMS = [
     to: '/agent',
     icon: UserGroupIcon,
     roles: [USER_TYPES.AGENT],
-  },
-  {
-    label: 'Chatbot',
-    to: '/chatbot',
-    icon: ChatBubbleLeftRightIcon,
   },
 ]
 

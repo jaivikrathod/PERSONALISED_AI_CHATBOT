@@ -7,26 +7,29 @@ import {
   answerReceived,
   chatClosed,
   customerMessageSent,
-  fetchSessions,
   messageDelivered,
+  sessionEstablished,
   socketErrorReceived,
   socketStatusChanged,
 } from '../redux/slices/customerChatSlice'
 
 /**
- * Owns the `ws/chat/` connection for the customer widget and translates every
+ * Owns the `ws/chat/` connection for the public widget and translates every
  * server event into a redux action. The wire protocol is unchanged:
  *
  *   out: { message, company_id, customer_user_id, customer_user_name,
  *          customer_user_email, session_id }
  *   in:  { type: "error" | "delivered" | "chat_closed" | "agent_message" }
  *        or an answer payload { answer, session_id, agent_needed, … }
+ *
+ * `customer_user_*` are optional — anonymous visitors send whatever the
+ * pre-chat form collected (possibly nothing at all).
  */
 export default function useCustomerChatSocket({
   companyId,
-  customerUserId,
-  customerUserName,
-  customerUserEmail,
+  customerUserId = null,
+  customerUserName = '',
+  customerUserEmail = '',
 }) {
   const dispatch = useDispatch()
   const activeSessionId = useSelector((s) => s.customerChat.activeSessionId)
@@ -40,6 +43,10 @@ export default function useCustomerChatSocket({
 
   const handleMessage = useCallback(
     (data) => {
+      // Every server frame that knows the session carries it; the first message
+      // of a conversation is what creates it server-side.
+      if (data.session_id) dispatch(sessionEstablished(data.session_id))
+
       switch (data.type) {
         case 'error':
           dispatch(socketErrorReceived(data.error))
@@ -54,26 +61,14 @@ export default function useCustomerChatSocket({
           dispatch(agentMessageReceived(data.answer))
           return
         default:
-          break
+          dispatch(answerReceived(data))
       }
-
-      dispatch(answerReceived(data))
-
-      // The first message of a conversation creates the session server-side;
-      // refresh the list so the new thread appears and stays selected.
-      const nextSessionId = data.session_id || activeSessionIdRef.current
-      dispatch(
-        fetchSessions({
-          companyId,
-          customerUserId,
-          preferredSessionId: nextSessionId ?? undefined,
-        }),
-      )
     },
-    [dispatch, companyId, customerUserId],
+    [dispatch],
   )
 
   const { status, send } = useWebSocket(`${WS_BASE_URL}/ws/chat/`, {
+    enabled: Boolean(companyId),
     onMessage: handleMessage,
   })
 
@@ -87,9 +82,9 @@ export default function useCustomerChatSocket({
       const sent = send({
         message: text,
         company_id: companyId,
-        customer_user_id: customerUserId,
-        customer_user_name: customerUserName,
-        customer_user_email: customerUserEmail,
+        customer_user_id: customerUserId || null,
+        customer_user_name: customerUserName || '',
+        customer_user_email: customerUserEmail || '',
         session_id: activeSessionIdRef.current,
       })
       if (sent) dispatch(customerMessageSent(text))

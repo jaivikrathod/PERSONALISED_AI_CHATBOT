@@ -13,7 +13,10 @@ export const WS_BASE_URL =
 // localStorage keys
 export const STORAGE_KEYS = {
   USER: 've_user',
+  // Prefix — the public widget stores one session id per company
+  // (`ve_chat_session_id:<companyId>`), see utils/guestChat.
   CHAT_SESSION_ID: 've_chat_session_id',
+  CHAT_GUEST: 've_chat_guest',
   THEME: 've_theme',
 }
 

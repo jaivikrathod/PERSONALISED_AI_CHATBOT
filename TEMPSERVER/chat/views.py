@@ -2,6 +2,8 @@ from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from company.models import Company
+
 from .models import ChatMessage, ChatSession
 from .serializers import (
     ChatMessageSerializer,
@@ -18,6 +20,27 @@ from .services import (
     session_group,
     with_last_message,
 )
+
+
+class ChatWidgetConfigView(APIView):
+    """GET /api/chat/widget/?company_id=<id>
+
+    Public metadata for the shareable chat widget (``/chat/<company_id>`` in
+    the frontend). Anonymous visitors hit this before they are allowed to type,
+    so it deliberately exposes only the company name — never the contact
+    details on the Company record.
+    """
+
+    def get(self, request):
+        company_id = request.query_params.get("company_id")
+        if not company_id:
+            return Response({"detail": "company_id is required."}, status=400)
+
+        company = Company.objects.filter(id=company_id).values("id", "name").first()
+        if company is None:
+            return Response({"detail": "Company not found."}, status=404)
+
+        return Response({"company_id": company["id"], "company_name": company["name"]})
 
 
 class ChatHistoryView(APIView):

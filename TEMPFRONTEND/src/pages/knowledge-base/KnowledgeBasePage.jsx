@@ -19,6 +19,7 @@ import {
   StatCard,
   Table,
 } from '../../components/ui'
+import ShareChatLinkCard from '../../components/chat/ShareChatLinkCard'
 import QuestionFormModal from './QuestionFormModal'
 import useAuth from '../../hooks/useAuth'
 import useDebounce from '../../hooks/useDebounce'
@@ -155,6 +156,8 @@ export default function KnowledgeBasePage() {
 
   return (
     <div>
+      <ShareChatLinkCard companyId={companyId} />
+
       <PageHeader
         title="Knowledge Base"
         subtitle="Manage the questions and answers that power your AI assistant."

@@ -15,7 +15,7 @@ const KnowledgeBasePage = lazy(
 )
 const UnansweredPage = lazy(() => import('../pages/unanswered/UnansweredPage'))
 const UsersPage = lazy(() => import('../pages/users/UsersPage'))
-const ChatbotPage = lazy(() => import('../pages/chatbot/ChatbotPage'))
+const PublicChatPage = lazy(() => import('../pages/public-chat/PublicChatPage'))
 const AgentConsolePage = lazy(() => import('../pages/agents/AgentConsolePage'))
 const NotFoundPage = lazy(() => import('../pages/NotFoundPage'))
 
@@ -31,6 +31,10 @@ export default function AppRoutes() {
   return (
     <Suspense fallback={<PageFallback />}>
       <Routes>
+        {/* Shareable chatbot for anonymous visitors. No auth guard and no
+            dashboard shell — this is the link a company hands to its customers. */}
+        <Route path="/chat/:companyId" element={<PublicChatPage />} />
+
         {/* Public — registration is the start of the flow. */}
         <Route element={<PublicRoute />}>
           <Route path="/register" element={<RegisterPage />} />
@@ -65,8 +69,6 @@ export default function AppRoutes() {
             >
               <Route path="/agent" element={<AgentConsolePage />} />
             </Route>
-
-            <Route path="/chatbot" element={<ChatbotPage />} />
           </Route>
         </Route>
 
