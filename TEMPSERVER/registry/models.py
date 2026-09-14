@@ -40,6 +40,11 @@ def default_policy() -> dict:
         "retrieval_floor": 0.32,
         "accept_threshold": 0.40,
         "margin_rule": 0.15,
+        # A best cosine this high is a clear match; the margin rule only
+        # guards the ambiguous band between accept_threshold and here.
+        "margin_bypass_score": 0.55,
+        # Hard ceiling on knowledge tokens handed to the model per search.
+        "max_context_tokens": 1200,
         # B5 server-side handoff safety net, independent of the model.
         "handoff_after_barren_turns": 3,
         # G7 caps.

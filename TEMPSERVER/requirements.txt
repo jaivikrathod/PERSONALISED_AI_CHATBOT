@@ -26,3 +26,7 @@ sentence-transformers>=2.2
 
 # LLM answer generation (Gemini)
 google-genai>=1.0
+
+# Document extraction for knowledge ingestion (Phase 2b)
+pypdf>=4
+python-docx>=1.1

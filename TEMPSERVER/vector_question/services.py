@@ -88,6 +88,26 @@ def generate_embedding(text: str) -> list[float]:
     return get_embedding_provider().embed(text)
 
 
+# Stored per knowledge chunk (B2.2) so a model upgrade can be indexed alongside.
+EMBEDDING_MODEL_NAME = SentenceTransformerEmbeddingProvider.MODEL_NAME
+
+
+def generate_embeddings(texts: list[str]) -> list[list[float]]:
+    """Batch form for ingestion jobs: one forward pass per batch, not per text."""
+    if not texts:
+        return []
+    vectors = SentenceTransformerEmbeddingProvider._get_model().encode(
+        texts, convert_to_numpy=True, normalize_embeddings=True, batch_size=32
+    )
+    return [vector.tolist() for vector in vectors]
+
+
+def count_tokens(text: str) -> int:
+    """Wordpiece tokens as the embedding model counts them (its window is 256)."""
+    tokenizer = SentenceTransformerEmbeddingProvider._get_model().tokenizer
+    return len(tokenizer.encode(text, add_special_tokens=False))
+
+
 def save_to_vector_db(embedding: list[float], metadata: dict[str, Any] | None = None) -> str:
     return get_vector_store().save(embedding, metadata or {})
 

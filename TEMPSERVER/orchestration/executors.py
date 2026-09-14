@@ -1,9 +1,9 @@
 """One executor per `Tool.tool_type` (WORKFLOW.md B1, Part D rule 7).
 
 An executor receives the server-side `TurnContext` and *validated* arguments.
-It never reads a tenant from its arguments: `ctx.company_id` is the only tenant
-it knows (G1). A new capability is a new entry in `EXECUTORS`, never a branch
-in the orchestrator.
+It never reads a tenant from its arguments: `ctx.company_id` / `ctx.chatbot`
+are the only tenant it knows (G1). A new capability is a new entry in
+`EXECUTORS`, never a branch in the orchestrator.
 """
 
 from __future__ import annotations
@@ -12,12 +12,13 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from pgvector.django import CosineDistance
-
 from chat.services import agent_group, flag_agent_needed, send_to_group_sync, session_event
-from questions.models import Question, UnansweredMessage
+from datasources.search import structured_search
+from knowledge.retrieval import search as search_knowledge_chunks
+from questions.models import UnansweredMessage
 from registry.models import Tool
-from vector_question.services import build_retrieval_text, generate_embedding
+
+from .results import ExecutorResult
 
 logger = logging.getLogger(__name__)
 
@@ -35,18 +36,6 @@ class TurnContext:
     parked: bool = False
     sources: list[dict] = field(default_factory=list)
     best_score: float | None = None
-
-
-@dataclass
-class ExecutorResult:
-    result: dict
-    summary: str
-    rows_returned: int | None = None
-
-    @property
-    def successful(self) -> bool:
-        """Did this produce something useful? Feeds the barren-turn safety net."""
-        return self.rows_returned is None or self.rows_returned > 0
 
 
 def park_unanswered(ctx: TurnContext) -> None:
@@ -76,49 +65,40 @@ def hand_off(ctx: TurnContext, reason: str) -> dict:
 
 
 def search_knowledge(ctx: TurnContext, tool: Tool, args: dict) -> ExecutorResult:
-    """Today's FAQ retrieval behind the B4 gate.
+    """Hybrid retrieval over FAQ and document chunks behind the B4 gate.
 
     An empty result is a signal the model acts on, not a failure — three weak
-    FAQs would be worse, because a capable model tries to answer from them.
+    passages would be worse, because a capable model tries to answer from them.
     """
-    policy = ctx.chatbot.get_policy
     query = args["query"]
-    probe = generate_embedding(build_retrieval_text(query))
-
-    rows = (
-        Question.objects.filter(
-            company_id=ctx.company_id,
-            is_archived=False,
-            is_vectorized=True,
-            embedding__isnull=False,
+    retrieval = search_knowledge_chunks(ctx.chatbot, query, args["top_k"])
+    if retrieval.best_score is not None:
+        ctx.best_score = (
+            retrieval.best_score if ctx.best_score is None else max(ctx.best_score, retrieval.best_score)
         )
-        .annotate(distance=CosineDistance("embedding", probe))
-        .order_by("distance")
-        .values_list("distance", "question", "answer")[: args["top_k"]]
-    )
-    scored = [(1.0 - float(d), q, a) for d, q, a in rows]
-    best = scored[0][0] if scored else None
-    if best is not None:
-        ctx.best_score = best if ctx.best_score is None else max(ctx.best_score, best)
+    audit = {
+        "accepted_by": retrieval.accepted_by,
+        "rejected_by": retrieval.rejected_by,
+        "best_score": retrieval.best_score,
+        **retrieval.diagnostics,
+    }
 
-    if best is None or best < policy("accept_threshold"):
+    if not retrieval.chunks:
         park_unanswered(ctx)
         return ExecutorResult(
             result={"chunks": [], "reason": "no_relevant_content"},
             summary=f"No relevant content for {query!r}.",
             rows_returned=0,
+            audit=audit,
         )
 
-    floor = policy("retrieval_floor")
-    chunks = [
-        {"question": q, "answer": a, "score": round(s, 4)} for s, q, a in scored if s >= floor
-    ]
-    ctx.sources.extend({"question": c["question"], "score": c["score"]} for c in chunks)
+    ctx.sources.extend({"question": c["title"], "score": c["score"]} for c in retrieval.chunks)
     return ExecutorResult(
-        result={"chunks": chunks},
-        summary=f"Returned {len(chunks)} passage(s) for {query!r}: "
-        + "; ".join(c["question"] for c in chunks),
-        rows_returned=len(chunks),
+        result={"chunks": retrieval.chunks},
+        summary=f"Returned {len(retrieval.chunks)} passage(s) for {query!r}: "
+        + "; ".join(c["title"] for c in retrieval.chunks),
+        rows_returned=len(retrieval.chunks),
+        audit=audit,
     )
 
 
@@ -130,4 +110,5 @@ def request_human_agent(ctx: TurnContext, tool: Tool, args: dict) -> ExecutorRes
 EXECUTORS: dict[str, Callable[[TurnContext, Tool, dict], ExecutorResult]] = {
     Tool.ToolType.KNOWLEDGE_SEARCH: search_knowledge,
     Tool.ToolType.HANDOFF: request_human_agent,
+    Tool.ToolType.STRUCTURED_SEARCH: structured_search,
 }

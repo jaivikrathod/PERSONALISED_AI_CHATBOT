@@ -58,6 +58,8 @@ INSTALLED_APPS = [
     'corsheaders',
     'chat',
     'registry',
+    'datasources',
+    'knowledge',
     'orchestration',
 ]
 
@@ -241,6 +243,10 @@ CHAT_PROVIDER = os.getenv("CHAT_PROVIDER", "gemini")
 # actually abandon a hung call (B5). Tests turn this off: a separate thread
 # opens its own DB connection and cannot see a TestCase transaction.
 ORCHESTRATION_TOOL_THREADS = True
+
+# Where knowledge ingestion jobs run: `thread` (default, in-process after
+# commit), `worker` (`manage.py run_ingestion_worker`) or `inline` (tests).
+INGESTION_MODE = os.getenv("INGESTION_MODE", "thread")
 
 # Retrieval floor: below this cosine score the best FAQ match is not even shown
 # to the LLM, and the chat is handed to a human agent.

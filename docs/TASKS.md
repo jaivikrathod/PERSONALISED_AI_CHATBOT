@@ -167,106 +167,214 @@ list at the end of this phase before starting Phase 2.
 
 ---
 
-## Phase 2 — Structured data (the universality payoff)
+## Phase 2 — Structured data (the universality payoff) ✅ done
 
 Goal: **a real estate bot and an unrelated vertical running the same code**,
 differing only by registry rows. This is where B0 preset 2 becomes real.
 
-### 2.1 Schema
-- [ ] `data_sources`, `data_source_fields`, `data_records`, `data_source_syncs`
-      per **B2.3**. `data_records.payload` is JSONB (D2).
-- [ ] Indexes: GIN `jsonb_path_ops` on `payload`; B-tree expression indexes on
-      numeric/date fields created **once when a source is published**, not per query.
+**Where this phase stands:** shipped in the new `TEMPSERVER/datasources/` app,
+pinned by `tests/test_datasources.py`. The acceptance test
+(`SecondVerticalTests`) onboards an e-commerce catalogue purely through the
+HTTP API and searches it through the orchestrator. Backend only — the screens
+that call this API are Phase 4.
 
-### 2.2 Ingestion
-- [ ] CSV **and** JSON upload → `data_records`, upsert on
-      `(data_source_id, external_id)`, run recorded in `data_source_syncs`.
-- [ ] Type inference from a sample → suggested `data_source_fields` rows.
-      *Inference is a suggestion, never silently authoritative* — a human
-      confirms before the source can be published.
-- [ ] Cardinality computation per string field (drives enum vs. free text in B3).
-- [ ] **Fixed filters per data source** (**E4.2**). A filter the server always
-      applies and never exposes to the model — `status = available`,
-      `in_stock = true`, `is_active = true`. Store on `data_sources.config`.
-      *Done when:* asking the bot "show me sold properties" returns none.
-      *Every vertical needs one of these — do not ship Phase 2 without it.*
-- [ ] **`description` required on every exposed field** (**E4.3**), with a live
-      example in the UI. This is what maps "flat"→apartment and "2bhk"→bedrooms=2.
-      *Done when:* a source cannot be published with a blank description on an
-      exposed field.
-- [ ] Import-time warnings for the three modelling traps (**E2**): a source that
-      looks split by category, a column whose meaning depends on another
-      (`price` where rows differ by `listing_type`), and a collapsed hierarchy.
-      Warn, do not block — the company decides.
+Module map: `models.py` (tables) · `types.py` (types, operators, coercion,
+inference) · `ingest.py` (upload → records, cardinality) · `warnings.py` (E2
+traps) · `declarations.py` (fields → JSON Schema) · `search.py` (compiler,
+G4–G7 validator, `records` adapter, result shaping, executor) ·
+`publishing.py` (checks, indexes, tool) · `views.py` (API).
 
-### 2.3 Declaration generator
-- [ ] `data_source_fields` → flat JSON Schema, following the generation table in
-      **B3** exactly (enum ≤50 cardinality, `min_`/`max_` pairs for numbers,
-      `_after`/`_before` for dates, `sort_by` enum).
-- [ ] Cache compiled declarations per `(chatbot_id, schema_version)`; invalidate
-      on any write to `tools`, `data_source_fields` or `action_parameters`.
-      *Why it matters:* declarations are re-sent every round trip (**B9**).
-- [ ] Never emit `data_source_id`, operators, field paths or table names into the
-      declaration.
+### 2.1 Schema ✅ done — `datasources/0001_initial`
+- [x] `data_sources`, `data_source_fields`, `data_records`, `data_source_syncs`
+      per **B2.3**, plus: `data_sources.company` (tenancy scoping, as every
+      other tenant table), `schema_confirmed_at` (the human confirmation),
+      `data_source_syncs.filename` / `warnings`.
+      `allowed_operators` is `text[]`; `payload` is JSONB (D2).
+- [x] GIN `jsonb_path_ops` on `payload`. B-tree expression indexes on exposed
+      numeric/date fields are created **at publish** (`ensure_indexes`),
+      partial on `data_source_id`, on exactly the expression the adapter
+      queries: `((payload ->> 'f')::double precision)` / `(payload ->> 'f')`.
+- [x] *Also:* `tool_executions.compiled_query` (`chat/0005`) — the IR is
+      "always logged" (B3), there rather than only in log lines.
 
-### 2.4 Compiler, validator, adapter
-- [ ] Flat parameters → the internal filter IR of **B3**. The model never emits
-      IR (D3).
-- [ ] Gates **G4** (`is_exposed`), **G5** (`allowed_operators`), **G6**
-      (type coercion / exact enum match). A rejection returns a *machine-readable
-      error naming the field and the allowed values* so the retry is informed.
-- [ ] `records` adapter: IR → ORM `KeyTextTransform` with an explicit cast per
-      declared type.
-- [ ] Result shaping per **B3**: `matched`, `returned`, `truncated`, and
-      `relaxable_filters` computed by re-running with each filter dropped in turn.
-      *Done when:* a zero-result query yields a useful next sentence, not a dead end.
-- [ ] `STRUCTURED_SEARCH` registered as a tool type in the registry.
+### 2.2 Ingestion ✅ done
+- [x] CSV **and** JSON (`[...]` or `{"records": [...]}`) → `data_records`,
+      upsert on `(data_source_id, external_id)`; `mode=replace` soft-deletes
+      rows absent from the file. Every run is a `data_source_syncs` row with
+      rejected-row reasons. `id_field` auto-picked (`external_id`/`id`/`ref`/
+      `sku`/…) and stored in `config`. Synchronous in the request; 20 MB cap.
+- [x] Values are **coerced at import** to the field type (blank → key absent,
+      uncastable → dropped + reported), so the adapter's casts are safe and
+      index-compatible. Changing a field's type re-coerces stored payloads.
+- [x] Type inference from a sample → suggested `data_source_fields`
+      (headers normalised to identifiers; column names containing phone/
+      email/cost/margin/owner/… start **hidden**). *Suggestion, not
+      authoritative:* publish requires `confirm-schema`, and importing new
+      columns clears the confirmation.
+- [x] Cardinality per field; `enum_values` kept while ≤ 50. String fields get
+      `equals` (enum) or `ilike` (free text) from it.
+- [x] **Fixed filters** in `data_sources.config.fixed_filters`, applied to
+      every query, never in the declaration, may target hidden fields.
+      *Done when:* "show me sold properties" returns none — ✅
+      (`test_the_fixed_filter_means_sold_properties_are_never_shown`).
+- [x] **`description` required on every exposed field** at publish, and on
+      PATCH of a published source. *Done when:* a source cannot be published
+      with a blank description on an exposed field — ✅.
+      *Not done:* "with a live example in the UI" — that is the Phase 4 screen.
+- [x] Import warnings for the three E2 traps (never blocking): a constant
+      category column or a sibling source with ~the same columns (trap 1); an
+      exposed numeric column whose median differs ≥ 20× across groups of a
+      low-cardinality column (trap 2); values that look like joined levels,
+      `Clothing > Ethnic` (trap 3).
 
-### 2.5 Prove it
-- [ ] The B0 worked example end to end: *"2BHK in New Ranip, not top floor"* →
-      correct IR → correct rows.
-- [ ] **The acceptance test for the whole product:** onboard a second, unrelated
-      vertical (products, or clinic appointments) **touching no Python**.
-      If it needs a code change, the abstraction leaked.
-- [ ] A non-exposed field (`internal_margin`) is invisible in both directions —
-      cannot be filtered on, never returned.
-- [ ] One conversation crosses between `search_knowledge` and
-      `search_<thing>` (**B0**) — proving the preset is not a branch.
-- [ ] The full E2 set on one bot: "buy 2bhk in New Ranip" (structured),
-      "how much brokerage" (knowledge), "rent 1bhk in Ahmedabad" (structured,
-      city-level, returns `truncated` and narrows instead of dumping a list).
-- [ ] Buy and rent live in **one** data source with a `listing_type` field, and
-      `sale_price` / `monthly_rent` are separate columns (**E2** traps 1 and 2).
-- [ ] `city` and `locality` are both filterable; a city-only query still works.
+### 2.3 Declaration generator ✅ done
+- [x] `data_source_fields` → flat JSON Schema per the **B3** table: enum ≤ 50,
+      `min_`/`max_` for numbers, `_after`/`_before` for dates, arrays for
+      `string_array`, `sort_by` enum, `limit` capped by
+      `policy.max_rows_returned`. **One deliberate addition:** numeric fields
+      with `equals` allowed also get an exact parameter (`bedrooms`), as the
+      B0/E2 examples use. Parameter collisions fail publish.
+- [x] Cache: the compiled schema is stored in `tools.input_schema` and read,
+      never recompiled, per turn. Invalidation: `refresh_tool` on every
+      write to a source or its fields (signals + explicit calls after bulk
+      writes), bumping `schema_version` only when the output changed.
+      *Not applicable yet:* `action_parameters` (Phase 3).
+- [x] No `data_source_id`, operators, field paths or table names in the
+      declaration — pinned by `test_the_declaration_is_flat_and_leaks_nothing`.
+
+### 2.4 Compiler, validator, adapter ✅ done — `datasources/search.py`
+- [x] Flat parameters → IR via the same `parameter_specs` the declaration is
+      built from. The model never emits IR (D3). `advanced_filters` not built.
+- [x] **G4** (exposed + filterable; hidden and nonexistent fields get the same
+      error), **G5** (`allowed_operators`), **G6** (cast, exact enum match),
+      **G7** (filter count, `limit`, offset, 300-char text cap — clamped).
+      Rejections reach the model as `invalid_arguments` naming the field and
+      the allowed values.
+- [x] `records` adapter: `KeyTextTransform` + explicit cast per type; dates as
+      ISO text.
+- [x] Result shaping: `matched`, `returned`, `truncated`, `rows` (only exposed
+      + returned fields, plus `ref`), and on zero results `relaxable_filters`
+      by re-running with each filter dropped (≤ 6 re-runs).
+      *Done when:* a zero-result query yields a next sentence — ✅.
+- [x] `STRUCTURED_SEARCH` executor registered; the source is resolved through
+      the turn's chatbot (G1), so a tool row pointing at another tenant's
+      source returns `tool_unavailable`.
+
+### 2.5 Prove it ✅ done — `tests/test_datasources.py`
+- [x] B0 worked example: *"2BHK in New Ranip, not top floor"* → exact IR → P-101.
+- [x] **Acceptance test:** an e-commerce catalogue onboarded via the API alone
+      (`SecondVerticalTests`) — no Python, no code change.
+- [x] `internal_margin` / `owner_phone` invisible in both directions.
+- [x] One conversation crosses `search_properties` → `search_knowledge` →
+      `search_properties`.
+- [x] The E2 set on one bot, including the city-level rent query returning
+      `truncated`.
+- [x] Buy and rent in **one** source with `listing_type`; `sale_price` /
+      `monthly_rent` separate (an "under 80 lakh" search skips rentals).
+- [x] `city` and `locality` both filterable; a city-only query works.
+
+### HTTP API (backend for the Phase 4 screens)
+`/api/data-sources/` CRUD · `{id}/import/` · `{id}/fields/` ·
+`{id}/confirm-schema/` · `{id}/publish/` · `{id}/unpublish/` ·
+`{id}/declaration/` ("what the AI sees") · `{id}/syncs/` ·
+`/api/data-source-fields/{id}/` (list/retrieve/PATCH). Admin/Manager only,
+scoped to the token's company.
+
+### Carried forward from Phase 2
+- Import runs in the request; move it to the Phase 2b background job.
+- `is_searchable` / `search_tsv` exist but are not compiled (full-text over
+  records). `advanced_filters` (OR-groups) not built.
+- The tool description is regenerated from `data_sources.description` on every
+  refresh — edit the source, not the tool row, or the edit is overwritten.
+- No live-Gemini run; tests use the scripted provider.
 
 ---
 
-## Phase 2b — Documents as knowledge
+## Phase 2b — Documents as knowledge ✅ done
 
 Can run parallel with Phase 2; independent of it. This is the "let companies
 upload their privacy policy / return policy" half of B0.
 
-- [ ] `knowledge_sources`, `knowledge_documents`, `knowledge_chunks` per **B2.2**.
-      `embed_text` separate from `content`; `embedding_model` stored per chunk.
-- [ ] Migrate `questions` rows into `knowledge_chunks` as `kind='faq'` — with
-      `embed_text` = question, `content` = answer. **Keep `questions` as the
-      authoring surface** (Part D rule 6). Do not drop it.
-- [ ] File upload + text extraction (PDF/DOCX/TXT/MD/HTML) with a `checksum` so
-      re-uploading an unchanged file is a no-op.
-- [ ] Chunker: ~300–500 tokens, ~15% overlap, split on headings and paragraph
-      boundaries, never mid-sentence. Store `{document_title, section_heading,
-      page}` in chunk metadata.
-- [ ] Ingestion as a **background job with visible progress**, not a request.
-- [ ] Hybrid retrieval per **B4**: pgvector top-30 + tsvector top-30 fused with
-      RRF (`Σ 1/(60+rank)`). *This is what makes policy documents work* — clause
-      numbers and plan names are exactly where full-text beats vectors.
-- [ ] Three-signal gate (`retrieval_floor`, `accept_threshold`, `margin_rule`)
-      stored in `chatbots.policy`.
-- [ ] **Ship the measurement harness in this same phase** (**B4**): ~50 labelled
-      questions per pilot tenant tagged `answerable`/`not`, tuned against
-      precision on the `not` set. An unmeasured threshold is a guess — that is
-      how 0.90 got there.
-- [ ] Move embedding out of the request path (**B9**).
+**Where this phase stands:** shipped in the new `TEMPSERVER/knowledge/` app,
+pinned by `tests/test_knowledge.py`. `search_knowledge` now runs hybrid
+retrieval over `knowledge_chunks` (FAQ + documents). Backend only — the
+upload/progress screen is Phase 4.
+
+Module map: `models.py` · `extraction.py` (PDF/DOCX/TXT/MD/HTML → blocks) ·
+`chunking.py` · `jobs.py` (DB-backed job queue) · `ingest.py` · `faq.py`
+(questions → chunks) · `retrieval.py` (hybrid + gate) · `evaluation.py`
+(harness) · `views.py` (API) · commands `run_ingestion_worker`,
+`evaluate_knowledge`.
+
+- [x] `knowledge_sources`, `knowledge_documents`, `knowledge_chunks` per
+      **B2.2** (`knowledge/0001`), plus `ingestion_jobs`. `embed_text`
+      separate from `content`; `embedding_model` per chunk; `content_tsv` is a
+      Postgres **generated column** over `embed_text` + `content` (english
+      config) with GIN; HNSW on `embedding`; one FAQ source per chatbot.
+- [x] `questions` → `knowledge_chunks` as `kind='faq'`, `embed_text` =
+      question, `content` = answer (`knowledge/0002`, frozen). **`questions`
+      stays the authoring surface:** `faq.py` mirrors every save/archive/delete
+      by signal and reuses the question's own embedding, so no model runs in
+      the request. A bot created later is backfilled.
+- [x] Upload + extraction (PDF via `pypdf`, DOCX via `python-docx`, TXT/MD,
+      HTML via stdlib) with a SHA-256 `checksum` — re-uploading an unchanged
+      file returns `unchanged: true` and queues nothing. Scanned (image-only)
+      PDFs fail with a clear message; no OCR. New deps in `requirements.txt`.
+- [x] Chunker: heading- and paragraph-aware, never mid-sentence, ~15% overlap,
+      metadata `{document_title, section_heading, page}`.
+      ⚠️ **Size deviates from this task on purpose:** all-MiniLM-L6-v2 reads
+      only 256 wordpiece tokens, so 300–500-token chunks would be embedded from
+      their first half. Chunks target ~200 and cap at 240 tokens *including* the
+      section heading, which is prefixed to every document chunk so clause
+      numbers ("Clause 4.2") are searchable. A single sentence over the cap is
+      the only mid-sentence split. Change the constants with the model.
+- [x] Ingestion as a **background job with visible progress**: `ingestion_jobs`
+      rows (`status`, `done_steps`/`total_steps`, `progress` %, `message`,
+      `error`), polled at `/api/ingestion-jobs/`. `INGESTION_MODE`: `thread`
+      (default, after commit), `worker` (`manage.py run_ingestion_worker`,
+      `SKIP LOCKED`, safe with several workers), `inline` (tests). A failed
+      extraction is a failed job, never a crashed worker.
+- [x] Hybrid retrieval per **B4**: pgvector top-30 + full-text top-30 (terms
+      OR-ed, `to_tsquery('english')`), fused with RRF `Σ 1/(60+rank)`, token
+      ceiling `policy.max_context_tokens` (1200).
+- [x] Three-signal gate in `chatbots.policy`: `retrieval_floor` (0.32),
+      `accept_threshold` (0.40), `margin_rule` (0.15, applied below
+      `margin_bypass_score` 0.55). **Plus lexical acceptance:** a query carrying
+      a specific token (has a digit, or is all-caps — clause numbers, plan and
+      SKU codes) is accepted when a full-text hit contains it, even at low
+      cosine. That is what makes "what does clause 4.2 say" work.
+      *Interpretation note:* B4's "fused rank-1 in top decile" was not
+      implementable without a score distribution to take a decile of; the gate
+      keeps the measured cosine threshold instead.
+- [x] **Measurement harness** (`knowledge/evaluation.py`,
+      `manage.py evaluate_knowledge --chatbot <slug> --fixture <json> [--tune]
+      [--target 0.95] [--write]`): precision on the `not` set first, then
+      recall; `--tune` grid-searches `accept_threshold` × `margin_rule`.
+      Shipped with `tests/fixtures/knowledge_eval.json` (15 FAQs, one policy
+      document, 25 answerable + 25 not), and the default gate is pinned against
+      it: **precision on `not` = 1.0, recall ≥ 0.8**.
+      ⚠️ *Not done:* ~50 labelled questions **per pilot tenant**. The fixture is
+      synthetic; run the command on real questions before trusting any value.
+- [~] Move embedding out of the request path (**B9**). Document embedding
+      runs in the job; FAQ mirroring reuses stored embeddings. Still in a
+      request: `POST /api/vectorize/{company_id}/` and the unanswered-inbox
+      `resolve` (one question), kept synchronous because the current frontend
+      reads their counts from the response. The per-turn *query* embedding is
+      inherent to a turn and is cached per process.
+
+### HTTP API (backend for the Phase 4 Knowledge screen)
+`/api/knowledge-sources/` (list/create `document`|`text`; `faq` is managed,
+`url` rejected until the Phase 3 egress guard) · `{id}/upload/` (multipart,
+202 + job) · `{id}/text/` · `{id}/documents/` ·
+`/api/knowledge-documents/{id}/` (retrieve/delete) · `/api/ingestion-jobs/`.
+Admin/Manager only, scoped to the token's company.
+
+### Carried forward from Phase 2b
+- `url` knowledge sources need the B6 egress guard (Phase 3).
+- The `search_knowledge` result shape changed from `{question, answer, score}`
+  to `{title, content, score, section?, page?}` — the model reads it; the
+  socket's `sources[]` frame is unchanged.
+- Cross-encoder reranker stays deferred (D5); revisit with harness data.
 
 ---
 
@@ -318,8 +426,8 @@ actual product goal.
       per field (**E4.4**): *"locality has 47 values: New Ranip, new ranip,
       Newranip…"*. This is where a company sees its own data is dirty. Dirty
       enums are the number-one cause of "the bot doesn't find anything".
-- [ ] Fixed-filter toggle on the field-permissions screen (pairs with the
-      Phase 2 backend task).
+- [ ] Fixed-filter toggle on the field-permissions screen (backend shipped in
+      Phase 2: `data_sources.config.fixed_filters`).
 - [ ] **Field permissions screen — the one that matters.** One row per field,
       toggles for exposed / filterable / sortable / returned, operator chips.
       This is where `internal_margin` stays invisible.

@@ -96,7 +96,7 @@ class GreetingTests(LoopTestCase):
         """L1 dying: today a greeting triggers a vector scan and can escalate."""
         provider = FakeProvider(said("Hi! How can I help you today?"))
 
-        with mock.patch.object(executors, "generate_embedding") as embed:
+        with mock.patch("knowledge.retrieval.embed_query") as embed:
             frame = self.turn("hello", provider)
 
         embed.assert_not_called()
@@ -136,7 +136,7 @@ class FollowUpTests(LoopTestCase):
         self.assertEqual(seen["user_texts"], [SHIPPING_Q, "and to Germany?"])
         self.assertEqual(seen["calls"], [{"query": SHIPPING_Q}])
         self.assertEqual(
-            seen["results"][0]["data"]["chunks"][0]["answer"], SHIPPING_A
+            seen["results"][0]["data"]["chunks"][0]["content"], SHIPPING_A
         )
         self.assertEqual(frame["answer"], "Germany is one of them, yes.")
 
@@ -180,7 +180,7 @@ class TenancyTests(LoopTestCase):
         self.assertEqual(execution.company_id, self.company.id)
 
         result = ChatMessage.objects.get(role=ChatMessage.Role.TOOL).tool_result
-        answers = [chunk["answer"] for chunk in result["chunks"]]
+        answers = [chunk["content"] for chunk in result["chunks"]]
         self.assertEqual(answers, [SHIPPING_A])
 
     def test_a_session_id_from_another_company_is_not_reused(self):

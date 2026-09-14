@@ -280,6 +280,7 @@ def _execute_call(ctx, tools, call, call_cache, customer, emit) -> bool:
         status=status,
         error_code=code,
         rows_returned=outcome.rows_returned,
+        compiled_query=outcome.audit,
         duration_ms=duration_ms,
     )
     _store(
@@ -330,6 +331,18 @@ def _run_validated(ctx, tool, validated, call_cache):
     timeout_s = policy("single_tool_timeout_ms") / 1000
     try:
         outcome = _call_with_timeout(executor, ctx, tool, validated, timeout_s)
+    except ValidationFailed as exc:
+        # G4/G5/G6 run inside executors that know their own fields. Same
+        # informed-retry contract as G3.
+        return (
+            ToolExecution.Status.REJECTED,
+            "invalid_arguments",
+            ExecutorResult(
+                result={"error": {"code": "invalid_arguments", "errors": exc.errors}},
+                summary=f"Rejected: {exc}",
+                rows_returned=0,
+            ),
+        )
     except FutureTimeout:
         # A timeout is a *result* the model can talk about, never an exception.
         return (

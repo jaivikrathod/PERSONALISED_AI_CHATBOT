@@ -41,8 +41,10 @@ PERSONALISED_AI_CHATBOT/
 │   ├── vector_question/ VectorJob + services.py (embeddings, Gemini, retrieval text)
 │   ├── chat/            ChatSession, ChatMessage, AgentConsumer (human agent console)
 │   ├── registry/        Chatbot, Tool + presets.py — the per-tenant tool registry (B2.1/B2.4)
+│   ├── datasources/     structured data (B2.3): import, declarations, IR compiler, G4–G7, records adapter
+│   ├── knowledge/       documents + FAQ chunks (B2.2): extraction, chunking, ingestion jobs, hybrid retrieval, harness
 │   ├── orchestration/   run_turn (B5), context (B7), gates (B6), executors, providers/ (D4)
-│   └── tests/           test_auth_and_tenancy.py, test_retrieval.py, test_registry.py, test_orchestration.py
+│   └── tests/           test_auth_and_tenancy.py, test_retrieval.py, test_registry.py, test_orchestration.py, test_datasources.py, test_knowledge.py
 └── TEMPFRONTEND/        React 19 + Vite + Redux Toolkit + Tailwind
     └── src/{pages,components,hooks,services,redux,routes,utils}
 ```
@@ -69,14 +71,22 @@ Stack facts that constrain any change:
 | `company` | `company.Company` | The tenant. name, email, mobile, address. |
 | `users` | `users.User` | FK company. `type` ∈ Admin/Agent/Manager. PBKDF2 password. |
 | `auth_tokens` | `users.AuthToken` | `key_hash` is the lookup column; raw token never stored. |
-| `questions` | `questions.Question` | FK company. `question`, `answer`, `embedding vector(384)`, `is_vectorized`, `is_archived`. HNSW index `questions_embedding_hnsw`. |
+| `questions` | `questions.Question` | FK company. Still the FAQ authoring surface; mirrored into `knowledge_chunks` on every save. `question`, `answer`, `embedding vector(384)`, `is_vectorized`, `is_archived`. HNSW index `questions_embedding_hnsw`. |
 | `unanswered_messages` | `questions.UnansweredMessage` | FK company. Raw customer message the bot could not answer. |
 | `vector_jobs` | `vector_question.VectorJob` | Per-company vectorization run: counters, status, timing. |
 | `chat_session` | `chat.ChatSession` | FK company, optional FK agent, `status`, `agent_needed`, `public_token`; B2.5: FK chatbot, `visitor_id`, `channel`, `working_set`, `summary`, `summary_upto_message_id`. |
 | `chat_message` | `chat.ChatMessage` | FK company+session, `message`, `sent_by_us`, `is_ai`, `message_type`, `attachments`; B2.5: `role`, `tool_call_id`, `tool_name`, `tool_args`, `tool_result`, `tool_result_summary`, `tokens`, `latency_ms`. Assistant row with `tool_name` = a call, `tool` row = its result; `objects.transcript()` hides both from people. |
-| `tool_executions` | `chat.ToolExecution` | G10 audit. FK company, conversation, message, tool (null if unknown). raw/validated args, `status` (ok/rejected/error/timeout/cached/rate_limited), `error_code`, `rows_returned`, `duration_ms`. |
+| `tool_executions` | `chat.ToolExecution` | G10 audit. FK company, conversation, message, tool (null if unknown). raw/validated args, `status` (ok/rejected/error/timeout/cached/rate_limited), `error_code`, `rows_returned`, `compiled_query` (the IR for structured search), `duration_ms`. |
+| `knowledge_sources` | `knowledge.KnowledgeSource` | FK company + chatbot. `kind` ∈ faq/document/text (url reserved), `status`. One `faq` source per chatbot, managed. |
+| `knowledge_documents` | `knowledge.KnowledgeDocument` | FK source. `external_ref` (filename or `question:<id>`), title, raw_text, `checksum`, status. |
+| `knowledge_chunks` | `knowledge.KnowledgeChunk` | FK chatbot, source, document. `content`, `embed_text`, `embedding vector(384)` (HNSW `kc_embedding_hnsw`), `embedding_model`, generated `content_tsv` (GIN), token_count, metadata. What `search_knowledge` searches. |
+| `ingestion_jobs` | `knowledge.IngestionJob` | Background ingestion with progress; payload bytes cleared when done. |
+| `data_sources` | `datasources.DataSource` | FK company + chatbot. `name` → tool `search_<name>`, `description` → tool description, `config` {`fixed_filters`, `id_field`}, `row_count`, `sync_status`, `schema_confirmed_at`, `is_published`. |
+| `data_source_fields` | `datasources.DataSourceField` | The security boundary. `name`, `data_type`, `description` (required if exposed, to publish), `is_exposed`/`is_filterable`/`is_sortable`/`is_returned`, `allowed_operators text[]`, `enum_values`, `cardinality`. |
+| `data_records` | `datasources.DataRecord` | `external_id` (unique per source), typed `payload` JSONB (GIN `jsonb_path_ops`), `deleted_at`. Publish adds partial expression indexes `dr_s<source>_*`. |
+| `data_source_syncs` | `datasources.DataSourceSync` | One row per import: mode, counts, `errors`, E2 `warnings`. |
 | `chatbots` | `registry.Chatbot` | FK company. `slug` (unique platform-wide), name, persona_prompt, model, temperature, locale, is_active, `policy` JSONB. One row per company, backfilled; registration provisions one. Re-read by the orchestrator every turn. |
-| `tools` | `registry.Tool` | FK chatbot. name, description, `tool_type`, `configuration`/`input_schema`/`rate_limit` JSONB, schema_version, is_active, requires_confirmation. Unique (chatbot, name). Two preset rows per chatbot. Executors in `orchestration/executors.py`, keyed by `tool_type`. |
+| `tools` | `registry.Tool` | FK chatbot. name, description, `tool_type`, `configuration`/`input_schema`/`rate_limit` JSONB, schema_version, is_active, requires_confirmation. Unique (chatbot, name). Two preset rows per chatbot, plus one `STRUCTURED_SEARCH` row per published data source (schema compiled from its fields). Executors in `orchestration/executors.py`, keyed by `tool_type`. |
 
 Two invariants worth knowing before editing:
 - `Question.save()` **clears the embedding and unsets `is_vectorized`** whenever
@@ -128,11 +138,13 @@ group → `run_turn` → send frames, each carrying `session_id` + `session_toke
 9. Store the answer, frame `type:"answer"` with `answer`, `is_answer_found`,
    `agent_needed`, `sources[]`, `score?`.
 
-`search_knowledge` embeds with `build_retrieval_text`, runs `CosineDistance`
-against the HNSW index (`top_k`, default 3), and returns
-`{"chunks": [], "reason": "no_relevant_content"}` when the best score is below
-`policy.accept_threshold` (**0.40**) — parking the message in
-`UnansweredMessage`. The model's own judgement of whether the passages answer
+`search_knowledge` (since Phase 2b, `knowledge/retrieval.py`) runs hybrid
+retrieval over `knowledge_chunks` — FAQ pairs *and* uploaded documents: vector
+top-30 + full-text top-30, RRF, then the gate (`retrieval_floor`,
+`accept_threshold` **0.40**, `margin_rule`, lexical acceptance of specific
+tokens like clause numbers). Nothing clearing it returns
+`{"chunks": [], "reason": "no_relevant_content"}` and parks the message in
+`UnansweredMessage`. Passages come back as `{title, content, score, section?, page?}`. The model's own judgement of whether the passages answer
 the question replaces the old `is_answer_found` JSON field.
 
 ### Why the threshold is 0.40 (do not "fix" it back to 0.90)
@@ -181,6 +193,9 @@ All under `/api/`.
 | `GET /chat/widget/`, `GET /chat/history/` | **open** | Widget config; history requires the session `token` |
 | `POST /chat/sessions/assign/` | | Manual agent assignment |
 | `/agent/chats/{,history,send,close}/` | Agent | REST twin of the agent socket |
+| `/data-sources/` CRUD + `{id}/import/`, `fields/`, `confirm-schema/`, `publish/`, `unpublish/`, `declaration/`, `syncs/` | Admin+Manager | Structured data onboarding (Phase 2) |
+| `/data-source-fields/{id}/` (list, retrieve, PATCH) | Admin+Manager | Field review / permissions |
+| `/knowledge-sources/` CRUD + `{id}/upload/`, `text/`, `documents/`; `/knowledge-documents/{id}/`; `/ingestion-jobs/` | Admin+Manager | Document knowledge + ingestion progress (Phase 2b) |
 
 WebSockets: `ws/chat/` (customer) and `ws/agent/` (agent console).
 
@@ -206,7 +221,8 @@ attaches the bearer token. `utils/constants.js` derives `WS_BASE_URL` from
 `GEMINI_MODEL`, `CHAT_CONFIDENCE_THRESHOLD` (calibration reference only since
 Phase 1 — the live gate is `chatbots.policy`), `CHAT_PROVIDER` (default
 `gemini`). `ORCHESTRATION_TOOL_THREADS` (settings.py, default on) runs
-executors in a thread so the tool timeout can fire.
+executors in a thread so the tool timeout can fire. `INGESTION_MODE`
+(`thread` default | `worker` with `manage.py run_ingestion_worker` | `inline`).
 `TEMPFRONTEND/.env`: `VITE_API_BASE_URL`, optional `VITE_WS_BASE_URL`.
 
 ## A9. What is genuinely limiting about A4 (the reason for Part B)
@@ -220,7 +236,7 @@ executors in a thread so the tool timeout can fire.
 | L5 | **The bot can only answer, never act.** No way to create a lead, book a slot, or check an order. | — |
 | L6 | Vectorization runs **synchronously in the request**, and embedding runs in the async consumer's thread. | `vector_question/views.py`, `consumers.py` |
 
-L1–L5 are what Part B fixes. **L1, L2 and L4 are fixed as of Phase 1.** **Note that F1/F2/F3/F7/F8 from the HTML doc are
+L1–L5 are what Part B fixes. **L1, L2 and L4 are fixed as of Phase 1; L3 as of Phase 2.** **Note that F1/F2/F3/F7/F8 from the HTML doc are
 already fixed** — do not re-open them.
 
 ---
@@ -270,8 +286,9 @@ of whether this design is real.
 > existing bot. Both are idempotent on `(chatbot, name)`, so re-running never
 > duplicates a row or overwrites a description the company has edited. In Phase 1
 > both presets provision the same two tools — preset 2's `search_<thing>` row
-> cannot exist until the tenant uploads data, so it is generated in Phase 2
-> rather than stubbed here.
+> cannot exist until the tenant uploads data. **Since Phase 2** it is created by
+> publishing a data source (`datasources/publishing.py`), for any bot, whatever
+> preset it started from.
 
 ### Worked contrast
 
@@ -825,7 +842,7 @@ Latency budget, typical two-tool turn: context assembly + declaration cache hit
 |---|---|---|---|
 | **0 — Unblock** | Bearer session tokens replacing `?user_type=`; Redis channel layer; pgvector + HNSW on `questions.embedding`; threshold 0.90 → 0.40; index/query text symmetry | Existing bot gets faster and stops over-escalating | ✅ **done** |
 | **1 — Loop** | `chatbots` + `tools`; orchestrator with exactly **two** tools (`search_knowledge`, `request_human_agent`); consumer reduced to transport; conversation history in context | The loop, the budgets, and multi-turn — at feature parity plus follow-ups | ✅ **done** — registry, B2.5 conversation schema, provider adapter, orchestrator with gates G1/G2/G3/G7/G9/G10, consumer reduced to transport; pinned by `tests/test_orchestration.py`. Streaming and the worker move remain cross-cutting. |
-| **2 — Structured** | `data_sources` / `data_source_fields` / `data_records`; CSV+JSON import; declaration generator; IR compiler; validator; `records` adapter | Real estate **and** one unrelated vertical on the same code, differing only by registry rows | |
+| **2 — Structured** | `data_sources` / `data_source_fields` / `data_records`; CSV+JSON import; declaration generator; IR compiler; validator; `records` adapter | Real estate **and** one unrelated vertical on the same code, differing only by registry rows | ✅ **done** — `datasources` app + API; e-commerce onboarded through the API alone in `tests/test_datasources.py`. |
 | **3 — Actions** | `actions` / `credentials`; egress guard; confirmation flow; rate limits; circuit breaker | Lead capture end to end, with a security review against B6 before it faces the internet | |
 | **4 — Self-serve** | The B8 config UI, the test console, per-tenant threshold tuning | A new tenant onboards with no engineering involvement | |
 
