@@ -40,7 +40,9 @@ PERSONALISED_AI_CHATBOT/
 │   ├── questions/       Question, UnansweredMessage, ChatConsumer (the bot socket)
 │   ├── vector_question/ VectorJob + services.py (embeddings, Gemini, retrieval text)
 │   ├── chat/            ChatSession, ChatMessage, AgentConsumer (human agent console)
-│   └── tests/           test_auth_and_tenancy.py, test_retrieval.py
+│   ├── registry/        Chatbot, Tool + presets.py — the per-tenant tool registry (B2.1/B2.4)
+│   ├── orchestration/   run_turn (B5), context (B7), gates (B6), executors, providers/ (D4)
+│   └── tests/           test_auth_and_tenancy.py, test_retrieval.py, test_registry.py, test_orchestration.py
 └── TEMPFRONTEND/        React 19 + Vite + Redux Toolkit + Tailwind
     └── src/{pages,components,hooks,services,redux,routes,utils}
 ```
@@ -51,8 +53,9 @@ Stack facts that constrain any change:
 - Vector store: **pgvector column on `questions.embedding`** with an HNSW cosine
   index. There is no external vector DB. `vector_question.MockVectorStore` is a
   vestigial stub — the real search runs in Postgres.
-- LLM: **Gemini** via `google-genai`, model from `GEMINI_MODEL`
-  (default `gemini-2.5-flash`), forced to `response_mime_type: application/json`.
+- LLM: **Gemini** via `google-genai` with function calling, model from
+  `chatbots.model` or `GEMINI_MODEL` (default `gemini-2.5-flash`). Only
+  `orchestration/providers/gemini.py` imports the SDK.
 - Realtime: Django Channels. `REDIS_URL` selects the Redis channel layer;
   without it the in-memory layer is used and a `RuntimeWarning` is raised.
 - Auth: **custom** `users.User` (not `django.contrib.auth`) + `AuthToken`
@@ -69,8 +72,11 @@ Stack facts that constrain any change:
 | `questions` | `questions.Question` | FK company. `question`, `answer`, `embedding vector(384)`, `is_vectorized`, `is_archived`. HNSW index `questions_embedding_hnsw`. |
 | `unanswered_messages` | `questions.UnansweredMessage` | FK company. Raw customer message the bot could not answer. |
 | `vector_jobs` | `vector_question.VectorJob` | Per-company vectorization run: counters, status, timing. |
-| `chat_session` | `chat.ChatSession` | FK company, optional FK agent, `status`, `agent_needed`, `public_token`. |
-| `chat_message` | `chat.ChatMessage` | FK company+session, `message`, `sent_by_us`, `is_ai`, `message_type`, `attachments`. |
+| `chat_session` | `chat.ChatSession` | FK company, optional FK agent, `status`, `agent_needed`, `public_token`; B2.5: FK chatbot, `visitor_id`, `channel`, `working_set`, `summary`, `summary_upto_message_id`. |
+| `chat_message` | `chat.ChatMessage` | FK company+session, `message`, `sent_by_us`, `is_ai`, `message_type`, `attachments`; B2.5: `role`, `tool_call_id`, `tool_name`, `tool_args`, `tool_result`, `tool_result_summary`, `tokens`, `latency_ms`. Assistant row with `tool_name` = a call, `tool` row = its result; `objects.transcript()` hides both from people. |
+| `tool_executions` | `chat.ToolExecution` | G10 audit. FK company, conversation, message, tool (null if unknown). raw/validated args, `status` (ok/rejected/error/timeout/cached/rate_limited), `error_code`, `rows_returned`, `duration_ms`. |
+| `chatbots` | `registry.Chatbot` | FK company. `slug` (unique platform-wide), name, persona_prompt, model, temperature, locale, is_active, `policy` JSONB. One row per company, backfilled; registration provisions one. Re-read by the orchestrator every turn. |
+| `tools` | `registry.Tool` | FK chatbot. name, description, `tool_type`, `configuration`/`input_schema`/`rate_limit` JSONB, schema_version, is_active, requires_confirmation. Unique (chatbot, name). Two preset rows per chatbot. Executors in `orchestration/executors.py`, keyed by `tool_type`. |
 
 Two invariants worth knowing before editing:
 - `Question.save()` **clears the embedding and unsets `is_vectorized`** whenever
@@ -95,33 +101,46 @@ authenticated token, never from the request.**
 
 ## A4. The chat pipeline as built
 
-`questions/consumers.py :: ChatConsumer` (`ws/chat/`). Per inbound frame:
+`questions/consumers.py :: ChatConsumer` (`ws/chat/`) is **transport only**:
+parse `{message, company_id, session_id?, customer_user_*}` → reject empty
+message / missing `company_id` → `resolve_session` (reuse `session_id` **scoped
+to `company_id`**, else create with the company's chatbot) → join the session
+group → `run_turn` → send frames, each carrying `session_id` + `session_token`.
 
-1. Parse `{message, company_id, session_id?, customer_user_*}`. Reject empty
-   message or missing `company_id`.
-2. `_get_or_create_session` → reuse `session_id` **scoped to `company_id`**, else create.
-3. Join the session channel group so agent replies reach this socket.
-4. Store the customer message (`sent_by_us=False, is_ai=False`).
-5. **If a human agent already owns the session** (`_live_agent_id`: agent set and
-   status ∈ open/in_progress) → forward to the agent group, reply `type:"delivered"`,
-   **the AI is skipped entirely**.
-6. `_top_matches` → embed the query with `build_retrieval_text` (bare question
-   text), then `CosineDistance` ordered against the HNSW index, `LIMIT 3`.
-   Returns `(similarity = 1 - distance, question, answer)`.
-7. Gate: no matches, or `best_score < CHAT_CONFIDENCE_THRESHOLD` (default **0.40**)
-   → store `UnansweredMessage`, `_handoff_to_agent`, reply `AGENT_HANDOFF_MESSAGE`.
-8. Otherwise `generate_answer(message, faq_pairs)` → Gemini returns
-   `{"message": ..., "is_answer_found": bool}`.
-9. If `is_answer_found` is false → park unanswered + hand off anyway. **The LLM's
-   self-assessment is a second, independent gate** on top of the score.
-10. Store the AI message, reply `type:"answer"` with `answer`, `score`,
-    `is_answer_found`, `agent_needed`, `sources[]`, `session_id`, `session_token`.
+`orchestration/orchestrator.py :: run_turn` (B5):
+
+1. Store the customer message (`role=user`).
+2. **If a human agent owns the session** → forward to the agent group, frame
+   `type:"delivered"`. **The model is skipped entirely.**
+3. Re-read the chatbot and its policy; bind `company_id` to a `TurnContext`.
+4. Safety net before the model: no active chatbot, or an explicit "talk to a
+   human" message → `hand_off`.
+5. Loop: `build_system_prompt` + `build_history` (B7) → provider with the
+   chatbot's tool declarations. No tool call → that text is the answer.
+6. Each tool call: store the call row → G2 (tool exists) → G1 (drop tenant
+   keys) → G3 (`validation.py`) → repeat-call cache → G9 rate limit → executor
+   with a timeout → write `tool_executions` (G10) → store the `tool` row →
+   emit `tool_started` to the socket.
+7. Budgets from `policy`: round trips / tool-call cap → one final call with
+   tools withheld; empty → handoff. Wall clock → apology + handoff.
+8. `handoff_after_barren_turns` consecutive turns whose tool calls all failed
+   or returned nothing → handoff.
+9. Store the answer, frame `type:"answer"` with `answer`, `is_answer_found`,
+   `agent_needed`, `sources[]`, `score?`.
+
+`search_knowledge` embeds with `build_retrieval_text`, runs `CosineDistance`
+against the HNSW index (`top_k`, default 3), and returns
+`{"chunks": [], "reason": "no_relevant_content"}` when the best score is below
+`policy.accept_threshold` (**0.40**) — parking the message in
+`UnansweredMessage`. The model's own judgement of whether the passages answer
+the question replaces the old `is_answer_found` JSON field.
 
 ### Why the threshold is 0.40 (do not "fix" it back to 0.90)
 Measured on MiniLM with bare-question index text, pinned by
 `tests/test_retrieval.py`: exact restatement ≈ 1.00, true paraphrase 0.44–0.80,
 unrelated 0.08–0.35. The usable separation is the narrow 0.35–0.44 band. The
-threshold is a **cheap pre-filter**, not the decision — `is_answer_found` is.
+threshold is a **cheap pre-filter**, not the decision — the model reading the
+returned passages is. It now lives in `chatbots.policy.accept_threshold`.
 
 ### Index/query symmetry (do not "improve" `build_retrieval_text`)
 Rows are embedded as the **bare question**, because queries are bare customer
@@ -184,7 +203,10 @@ attaches the bearer token. `utils/constants.js` derives `WS_BASE_URL` from
 ## A8. Configuration
 
 `TEMPSERVER/.env` (see `.env.example`): `DB_*`, `REDIS_URL`, `GEMINI_API_KEY`,
-`GEMINI_MODEL`, `CHAT_CONFIDENCE_THRESHOLD`.
+`GEMINI_MODEL`, `CHAT_CONFIDENCE_THRESHOLD` (calibration reference only since
+Phase 1 — the live gate is `chatbots.policy`), `CHAT_PROVIDER` (default
+`gemini`). `ORCHESTRATION_TOOL_THREADS` (settings.py, default on) runs
+executors in a thread so the tool timeout can fire.
 `TEMPFRONTEND/.env`: `VITE_API_BASE_URL`, optional `VITE_WS_BASE_URL`.
 
 ## A9. What is genuinely limiting about A4 (the reason for Part B)
@@ -198,7 +220,7 @@ attaches the bearer token. `utils/constants.js` derives `WS_BASE_URL` from
 | L5 | **The bot can only answer, never act.** No way to create a lead, book a slot, or check an order. | — |
 | L6 | Vectorization runs **synchronously in the request**, and embedding runs in the async consumer's thread. | `vector_question/views.py`, `consumers.py` |
 
-L1–L5 are what Part B fixes. **Note that F1/F2/F3/F7/F8 from the HTML doc are
+L1–L5 are what Part B fixes. **L1, L2 and L4 are fixed as of Phase 1.** **Note that F1/F2/F3/F7/F8 from the HTML doc are
 already fixed** — do not re-open them.
 
 ---
@@ -241,6 +263,15 @@ code paths.
 Preset 2 is a strict superset of preset 1. Upgrading a company from 1 to 2 is
 inserting rows — no migration, no redeploy, no downtime. That is the whole test
 of whether this design is real.
+
+> **Implemented** in `TEMPSERVER/registry/presets.py`. `PRESETS` is a dict of
+> name → list of tool specs; `provision_chatbot(company, preset)` creates the
+> `Chatbot` row and its tools, `provision_tools(chatbot, preset)` upgrades an
+> existing bot. Both are idempotent on `(chatbot, name)`, so re-running never
+> duplicates a row or overwrites a description the company has edited. In Phase 1
+> both presets provision the same two tools — preset 2's `search_<thing>` row
+> cannot exist until the tenant uploads data, so it is generated in Phase 2
+> rather than stubbed here.
 
 ### Worked contrast
 
@@ -366,7 +397,11 @@ knowledge sources.
 | `chatbots` | id, company_id, **slug**, name, persona_prompt, model, temperature, locale, is_active, **policy jsonb** | new |
 
 `chatbots.policy` holds what are global constants today: retrieval floor, accept
-threshold, max tool calls per turn, handoff rules, row caps. `slug` replaces the
+threshold, max tool calls per turn, handoff rules, row caps. **Read it through
+`Chatbot.get_policy(key)`, never by indexing `policy` directly** — the defaults
+live in `registry.models.default_policy()` and a missing key falls back to them,
+which is what keeps adding a new budget from being a data migration over every
+row. The backfilled rows carry `policy = {}` for exactly this reason. `slug` replaces the
 raw company id in the public URL (`/chat/acme-support`, not `/chat/7`) so link
 recipients cannot enumerate tenants by incrementing an integer.
 
@@ -789,7 +824,7 @@ Latency budget, typical two-tool turn: context assembly + declaration cache hit
 | Phase | Ships | Proves | Status |
 |---|---|---|---|
 | **0 — Unblock** | Bearer session tokens replacing `?user_type=`; Redis channel layer; pgvector + HNSW on `questions.embedding`; threshold 0.90 → 0.40; index/query text symmetry | Existing bot gets faster and stops over-escalating | ✅ **done** |
-| **1 — Loop** | `chatbots` + `tools`; orchestrator with exactly **two** tools (`search_knowledge`, `request_human_agent`); consumer reduced to transport; conversation history in context | The loop, the budgets, and multi-turn — at feature parity plus follow-ups | ▶ **next** |
+| **1 — Loop** | `chatbots` + `tools`; orchestrator with exactly **two** tools (`search_knowledge`, `request_human_agent`); consumer reduced to transport; conversation history in context | The loop, the budgets, and multi-turn — at feature parity plus follow-ups | ✅ **done** — registry, B2.5 conversation schema, provider adapter, orchestrator with gates G1/G2/G3/G7/G9/G10, consumer reduced to transport; pinned by `tests/test_orchestration.py`. Streaming and the worker move remain cross-cutting. |
 | **2 — Structured** | `data_sources` / `data_source_fields` / `data_records`; CSV+JSON import; declaration generator; IR compiler; validator; `records` adapter | Real estate **and** one unrelated vertical on the same code, differing only by registry rows | |
 | **3 — Actions** | `actions` / `credentials`; egress guard; confirmation flow; rate limits; circuit breaker | Lead capture end to end, with a security review against B6 before it faces the internet | |
 | **4 — Self-serve** | The B8 config UI, the test console, per-tenant threshold tuning | A new tenant onboards with no engineering involvement | |
@@ -801,7 +836,7 @@ the claim this architecture makes.
 ## Open decisions
 | | Question | Recommendation |
 |---|---|---|
-| D1 | Introduce `chatbots` now, or keep `company` as the tenant key? | **Now.** One table and one FK while the data is small; later means backfilling every tool, source and conversation row. |
+| D1 | Introduce `chatbots` now, or keep `company` as the tenant key? | **DECIDED — now** *(2026-09-09)*. One table and one FK while the data is small; later means backfilling every tool, source and conversation row. Shipped as the `registry` app: `0001_initial` creates `chatbots` + `tools`, `0002_backfill_chatbots` gives every existing company a bot and its two preset tool rows. Do not re-open. |
 | D2 | JSONB record store, or per-source physical tables? | **JSONB**, with the adapter seam for a later migration. |
 | D3 | Flat parameters, or raw filter IR as the model-facing schema? | **Flat**, with opt-in `advanced_filters`. |
 | D4 | Bind to Gemini, or abstract the provider now? | **Thin adapter now** — declarations in, calls out. A day's work, not a framework. |

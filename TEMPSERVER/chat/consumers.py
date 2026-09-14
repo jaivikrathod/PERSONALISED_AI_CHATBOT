@@ -224,7 +224,7 @@ class AgentConsumer(AsyncWebsocketConsumer):
         )
         if session is None:
             return None
-        return ChatMessageSerializer(session.messages.all(), many=True).data
+        return ChatMessageSerializer(session.messages.transcript(), many=True).data
 
     @database_sync_to_async
     def _store_agent_message(self, session_id, message):

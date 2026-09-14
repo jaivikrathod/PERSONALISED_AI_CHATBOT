@@ -62,6 +62,9 @@ export default function useCustomerChatSocket({
         case 'delivered':
           dispatch(messageDelivered())
           return
+        case 'tool_started':
+          // Progress hint while the bot runs a lookup; not a chat bubble.
+          return
         case 'chat_closed':
           dispatch(chatClosed())
           return

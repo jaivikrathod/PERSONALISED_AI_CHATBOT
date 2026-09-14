@@ -106,15 +106,18 @@ def with_last_message(queryset):
     Shared by the customer inbox, the agent inbox and the agent socket so all
     three render the same session summary.
     """
-    latest_message = ChatMessage.objects.filter(session_id=OuterRef("pk")).order_by(
-        "-created_at"
+    latest_message = (
+        ChatMessage.objects.transcript()
+        .filter(session_id=OuterRef("pk"))
+        .order_by("-created_at")
     )
     sessions = (
         queryset.select_related("company", "agent")
         .annotate(
             last_message_id=Subquery(latest_message.values("id")[:1]),
             message_count=Subquery(
-                ChatMessage.objects.filter(session_id=OuterRef("pk"))
+                ChatMessage.objects.transcript()
+                .filter(session_id=OuterRef("pk"))
                 .order_by()
                 .values("session_id")
                 .annotate(count=Count("id"))

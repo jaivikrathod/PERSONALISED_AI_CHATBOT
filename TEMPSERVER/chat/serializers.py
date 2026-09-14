@@ -37,7 +37,18 @@ class ChatMessageSerializer(serializers.ModelSerializer):
 
 
 class ChatSessionSerializer(serializers.ModelSerializer):
-    messages = ChatMessageSerializer(many=True, read_only=True)
+    messages = serializers.SerializerMethodField()
+
+    def get_messages(self, obj):
+        # Filtered in Python so a `prefetch_related("messages")` still applies.
+        # Tool calls and results are replayed to the model, not shown to people.
+        visible = [
+            m
+            for m in obj.messages.all()
+            if m.role in (ChatMessage.Role.USER, ChatMessage.Role.ASSISTANT)
+            and not m.tool_name
+        ]
+        return ChatMessageSerializer(visible, many=True).data
 
     class Meta:
         model = ChatSession

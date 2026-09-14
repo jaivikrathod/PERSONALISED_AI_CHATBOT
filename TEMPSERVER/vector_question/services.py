@@ -18,10 +18,6 @@ class EmbeddingError(Exception):
     pass
 
 
-class LLMError(Exception):
-    pass
-
-
 class EmbeddingProvider(ABC):
     @abstractmethod
     def embed(self, text: str) -> list[float]:
@@ -90,104 +86,6 @@ def get_vector_store() -> VectorStore:
 
 def generate_embedding(text: str) -> list[float]:
     return get_embedding_provider().embed(text)
-
-
-_FAQ_PROMPT = """
-You are a professional customer support assistant.
-
-Your job is to answer the customer's question using ONLY the FAQ information provided below.
-
-FAQ Knowledge:
-{context}
-
-Customer Question:
-{question}
-
-Instructions:
-- Answer as if you are a real customer support representative chatting with the customer.
-- Use a warm, polite, and professional tone.
-- Provide a complete and natural response instead of short or keyword-based answers.
-- Rewrite the FAQ information into a fluent sentence rather than copying it verbatim.
-- If multiple pieces of FAQ information are relevant, combine them into a single clear response.
-- Do not add any information that is not present in the FAQ.
-- Do not guess or assume missing details.
-- Do not mention "according to the FAQ" or "the provided context."
-
-Respond with ONLY a JSON object (no markdown, no extra text) in exactly this shape:
-{{"message": "<your reply to the customer>", "is_answer_found": <true or false>}}
-
-Set "is_answer_found" to false when the FAQ does not contain enough information to
-answer the question. In that case set "message" to:
-"Sorry, I could not find that information in our FAQ database."
-Otherwise set "is_answer_found" to true and put your helpful answer in "message".
-"""
-
-
-def _parse_answer_payload(text: str) -> tuple[str, bool]:
-    """Parse Gemini's JSON reply into (message, is_answer_found).
-
-    Falls back gracefully if the model wraps the JSON in code fences or fails
-    to return valid JSON at all, so a formatting hiccup never crashes a chat.
-    """
-    import json
-    import re
-
-    cleaned = text.strip()
-    # Strip ```json ... ``` / ``` ... ``` fences if the model added them.
-    if cleaned.startswith("```"):
-        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned).strip()
-
-    try:
-        data = json.loads(cleaned)
-        message = (data.get("message") or "").strip()
-        is_answer_found = bool(data.get("is_answer_found"))
-        if message:
-            return message, is_answer_found
-    except (json.JSONDecodeError, AttributeError):
-        logger.warning("Could not parse Gemini JSON response: %r", text)
-
-    # Fallback: treat the raw text as the message and infer the flag from the
-    # known "not found" apology phrase.
-    not_found = "could not find that information" in cleaned.lower()
-    return cleaned, not not_found
-
-
-def generate_answer(
-    user_question: str, faq_pairs: list[tuple[str, str]]
-) -> tuple[str, bool]:
-    """Ask Gemini to answer `user_question` using only the given FAQ pairs.
-
-    `faq_pairs` is a list of (question, answer) tuples (the top matches).
-    Returns a (message, is_answer_found) tuple: `is_answer_found` is False when
-    the FAQ context did not contain enough information to answer, so the caller
-    can escalate to a human. Raises LLMError on any failure.
-    """
-    from django.conf import settings
-    from google import genai
-
-    if not settings.GEMINI_API_KEY:
-        raise LLMError("GEMINI_API_KEY is not configured.")
-
-    context = "".join(
-        f"\nQuestion: {q}\nAnswer: {a}\n" for q, a in faq_pairs
-    )
-    prompt = _FAQ_PROMPT.format(context=context, question=user_question)
-
-    try:
-        client = genai.Client(api_key=settings.GEMINI_API_KEY)
-        response = client.models.generate_content(
-            model=settings.GEMINI_MODEL,
-            contents=prompt,
-            config={"response_mime_type": "application/json"},
-        )
-    except Exception as exc:  # network / auth / quota errors
-        logger.exception("Gemini request failed")
-        raise LLMError(f"Error communicating with Gemini: {exc}") from exc
-
-    text = (getattr(response, "text", None) or "").strip()
-    if not text:
-        raise LLMError("Gemini returned an empty response.")
-    return _parse_answer_payload(text)
 
 
 def save_to_vector_db(embedding: list[float], metadata: dict[str, Any] | None = None) -> str:

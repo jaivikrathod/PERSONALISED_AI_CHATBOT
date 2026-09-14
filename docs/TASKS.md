@@ -17,6 +17,21 @@ are written against.
   the task is not done.
 - Re-read Part D of WORKFLOW.md before writing code. Especially rule 1
   (tenancy), rule 3 (no industry branches) and rule 3a (a preset is data).
+- **Update this file and WORKFLOW.md in the same commit as the code.** A task
+  ticked here with nothing shipped, or a table in Part A that no longer matches
+  the models, is worse than no document — the next agent trusts it.
+
+**Conventions already set by shipped code** (follow them; do not re-litigate)
+- Registry lives in `TEMPSERVER/registry/`. `Chatbot` is the anchor for
+  everything Phase 2+ adds; new tables FK to it, not to `Company`.
+- Per-bot budgets are read with `Chatbot.get_policy(key)`, never by indexing
+  `policy`. Defaults live in `registry.models.default_policy()`.
+- Presets are rows written by `registry/presets.py` at onboarding, never read at
+  runtime. Adding a vertical means adding a `PRESETS` entry, not a branch.
+- Data migrations **copy their specs in and freeze them**; they never import
+  `presets.py`, which will keep changing.
+- Tests for a new app go in `TEMPSERVER/tests/test_<app>.py`, not the app's own
+  `tests.py`, matching `test_retrieval.py` and `test_auth_and_tenancy.py`.
 
 ---
 
@@ -33,7 +48,7 @@ Recorded for history; do not redo.
 
 ---
 
-## Phase 1 — The loop  ▶ next
+## Phase 1 — The loop ✅ done
 
 Goal: **feature parity with today, plus multi-turn follow-ups**, with routing
 moved from the consumer into the model. Two tools only.
@@ -41,81 +56,114 @@ moved from the consumer into the model. Two tools only.
 > **Protect this phase from scope creep.** No structured data, no actions, no
 > config UI. Two tools is enough to prove the loop.
 
-### 1.1 Decide D1 before writing any migration
-- [ ] **Confirm the `chatbots` table lands now, not later.** (WORKFLOW.md → Open
-      decisions, D1.) Everything below assumes yes. If the answer is no, stop —
-      half this phase changes shape.
-      *Done when:* the decision is written into the D1 row of WORKFLOW.md.
+**Where this phase stands:** shipped. The socket runs every customer message
+through `orchestration.run_turn`; `chatbots.policy` is read at runtime; the old
+threshold-then-LLM pipeline and `vector_question.generate_answer` are gone.
+Pinned by `tests/test_orchestration.py` (27 tests). Read the *Carried forward*
+list at the end of this phase before starting Phase 2.
+
+### 1.1 Decide D1 before writing any migration ✅ done
+- [x] **Confirm the `chatbots` table lands now, not later.** (WORKFLOW.md → Open
+      decisions, D1.) **Answer: now.** Written into the D1 row (2026-09-09).
+      Do not re-open.
 
 ### 1.2 Schema
-- [ ] New Django app `registry`. Models: `Chatbot`, `Tool`.
-      `Chatbot`: company FK, `slug` (unique, public URL key), name,
-      persona_prompt, model, temperature, locale, is_active, `policy` JSONB.
-      `Tool`: chatbot FK, name, description, `tool_type`, `configuration` JSONB,
-      `input_schema` JSONB, schema_version, is_active, requires_confirmation,
-      rate_limit JSONB, unique (chatbot, name). Schema per **B2.1 / B2.4**.
-- [ ] Data migration: one `Chatbot` per existing `Company`, slug from the
-      company name, plus its two preset `Tool` rows.
-      *Done when:* every existing company keeps working with no client change.
-- [ ] Extend `chat.ChatSession`: `chatbot` FK, `visitor_id`, `channel`,
+
+**1.2a — the registry ✅ done.** Shipped in `TEMPSERVER/registry/`.
+
+- [x] New Django app `registry`. Models: `Chatbot`, `Tool` (**B2.1 / B2.4**),
+      `registry/presets.py`, `default_policy()` + `Chatbot.get_policy()`,
+      `Tool.declaration()`, admin, `tests/test_registry.py`.
+- [x] Data migration `registry/0002_backfill_chatbots.py` — one `Chatbot` per
+      existing `Company` plus its two preset `Tool` rows, specs frozen.
+- [x] *Added in 1.2b:* registration (`users/serializers.py`) now calls
+      `provision_chatbot`, so companies created after the backfill get a bot.
+
+**1.2b — the conversation schema ✅ done.** `chat/0003_conversation_schema`,
+`chat/0004_backfill_roles_and_chatbots`.
+- [x] `chat.ChatSession`: `chatbot` FK, `visitor_id`, `channel`,
       `working_set` JSONB, `summary`, `summary_upto_message_id`. (**B2.5**)
-- [ ] Extend `chat.ChatMessage`: `role` (`user`/`assistant`/`tool`/`system`),
-      `tool_call_id`, `tool_name`, `tool_args`, `tool_result`,
-      `tool_result_summary`, `tokens`, `latency_ms`. (**B2.5**)
-      *Backfill:* existing rows → `role='user'` where `sent_by_us=False`, else
-      `role='assistant'`.
-- [ ] New `tool_executions` table (**B2.5**). Written by G10 from day one, even
-      though only two tools exist.
+      Existing sessions backfilled to their company's first chatbot.
+- [x] `chat.ChatMessage`: `role`, `tool_call_id`, `tool_name`, `tool_args`,
+      `tool_result`, `tool_result_summary`, `tokens`, `latency_ms`. (**B2.5**)
+      Backfilled `user` / `assistant` from `sent_by_us`.
+      An assistant row with `tool_name` set is a *call*; a `tool` row is its
+      result. `ChatMessage.objects.transcript()` hides both from the widget
+      history, the agent console and inbox previews — same rows, filtered.
+- [x] `chat.ToolExecution` → `tool_executions` (**B2.5**), one row per call
+      including rejected ones, plus `company` FK for tenant scoping.
 
-### 1.3 Provider adapter (D4)
-- [ ] `orchestration/providers/` — a thin seam: declarations in, tool calls out,
-      streamed text out. Gemini implementation only.
-      *Done when:* nothing outside this package imports `google.genai`.
-      *Explicitly not:* a framework. Target a day's work.
+### 1.3 Provider adapter (D4) ✅ done
+- [x] `orchestration/providers/` — `base.py` (`ChatProvider`, `ToolCall`,
+      `HistoryItem`, `ModelResponse`), `gemini.py`, `get_provider()` keyed by
+      `CHAT_PROVIDER`. Gemini thought signatures are persisted in the call row's
+      `attachments.provider_meta` and replayed.
+      *Done when:* nothing outside this package imports `google.genai` —
+      ✅ pinned by `StructureTests`.
+      *Not done here:* token streaming — see Cross-cutting.
 
-### 1.4 The orchestrator
-- [ ] New app `orchestration`. `run_turn(session, message) -> events`
-      implementing the lifecycle in **B5**: resolve → **live-agent check first**
-      → assemble context → model → tool calls → validate → execute → loop.
-- [ ] Budgets from **B5** read out of `chatbots.policy`, with the defaults in
-      that table. A tool timeout returns a *result*, never raises.
-- [ ] Context assembly per **B7**: system prompt + persona, rolling summary,
-      last 8 turns verbatim, full tool JSON for the last 2 turns and
-      `tool_result_summary` beyond that.
-      *Do not* implement server-side filter merging. The log is the state.
-- [ ] Gates **G1, G2, G3, G7, G9, G10** wired now (G4/G5/G6 arrive with
-      structured data in Phase 2, G8 with actions in Phase 3). G1 is
-      non-negotiable: tenant identity comes from the session, and a
-      model-supplied tenant id is *ignored*, not validated.
+### 1.4 The orchestrator ✅ done
+- [x] `orchestration.orchestrator.run_turn(session, message, …)` implementing
+      **B5**: store → **live-agent check first** → re-read chatbot/policy →
+      safety net → context → model → gates → execute → loop.
+- [x] Budgets read via `chatbot.get_policy()`. Round trips / tool-call cap →
+      one final call with tools withheld; empty final answer → handoff;
+      wall clock → apology + handoff; tool timeout → a `timeout` *result*
+      (executor runs in a worker thread, `ORCHESTRATION_TOOL_THREADS`);
+      identical repeat call → `cached`, not re-executed.
+- [x] Context per **B7** (`orchestration/context.py`): platform prompt +
+      persona, `summary`, last 8 turns, full tool JSON for the last 2 turns and
+      `tool_result_summary` beyond, `working_set` if set. No filter merging.
+      *Nothing writes `summary` or `working_set` yet* — columns and replay
+      exist; the summariser is future work.
+- [x] Gates **G1** (tenant keys dropped + WARNING log, executors only see
+      `ctx.company_id`), **G2** (unknown tool → error listing available tools),
+      **G3** (`orchestration/validation.py`, the schema subset the registry
+      emits — swap in `jsonschema` if Phase 2 outgrows it), **G7** (tool-call
+      cap, `top_k` max), **G9** (`rate_limit.per_conversation` /
+      `per_company_per_minute`), **G10** (`tool_executions`).
+      Tool results reach the model in a `{"data": …}` envelope and the system
+      prompt states tool output is data.
 
-### 1.5 The two tools
-- [ ] `search_knowledge` — wraps today's retrieval. Fixed schema `{query, top_k?}`.
-      Returns `{"chunks": [], "reason": "no_relevant_content"}` when nothing
-      clears the gate (**B4**) — an empty result is a signal, not a failure.
-- [ ] `request_human_agent` — wraps the existing `flag_agent_needed`.
-      Schema `{reason, summary?}`.
-- [ ] **Server-side handoff safety net, independent of the model** (**B5**):
-      N consecutive turns with no successful tool result, an explicit
-      "talk to a human" match, or budget exhaustion forces handoff.
-      *Done when:* a deliberately looping model still reaches an agent.
+### 1.5 The two tools ✅ done
+- [x] `search_knowledge` (`orchestration/executors.py`) — today's pgvector
+      retrieval behind `accept_threshold` / `retrieval_floor` from policy.
+      Returns `{"chunks": [], "reason": "no_relevant_content"}` below the gate
+      and parks the message in `UnansweredMessage`, as before.
+      `margin_rule` is not applied — it needs the hybrid recall of Phase 2b.
+- [x] `request_human_agent` — wraps `flag_agent_needed` and pings the agent
+      console (`hand_off`, shared with the safety net).
+- [x] Server-side handoff safety net (**B5**): explicit "talk to a human"
+      pattern (model skipped), no active chatbot, budget exhaustion with no
+      answer, and `handoff_after_barren_turns` consecutive turns whose tool
+      calls all failed or came back empty — computed from `tool_executions`,
+      so greetings (no tool call) never count.
+      *Done when:* a deliberately looping model still reaches an agent — ✅.
 
-### 1.6 Reduce the consumer to transport
-- [ ] `questions/consumers.py :: ChatConsumer.receive()` becomes: parse frame →
-      resolve session → hand to the orchestrator → stream events back. All
-      branching in it today disappears.
-      *Done when:* the file contains no threshold comparison and no LLM call.
-- [ ] Keep the existing outbound frame shape (`type:"answer"`, `session_id`,
-      `session_token`, …) so `TEMPFRONTEND` needs no change in this phase.
-      Add `type:"tool_started"` for the "checking…" indicator (**B9**).
+### 1.6 Reduce the consumer to transport ✅ done
+- [x] `questions/consumers.py` — parse → `resolve_session` → `run_turn` →
+      send frames. *Done when:* no threshold comparison and no LLM call —
+      ✅ pinned by `StructureTests`.
+- [x] Outbound frame shape unchanged (`answer`, `delivered`, `error`,
+      `session_id`, `session_token`, …). Added `type:"tool_started"`
+      (`{tool, label}`, label from `tool.configuration.progress_label`).
+      ⚠️ One-line frontend change was unavoidable: the widget's `switch`
+      treated any unknown frame as an answer, so
+      `useCustomerChatSocket.js` now ignores `tool_started`.
 
-### 1.7 Prove it
-- [ ] Test: a greeting produces **no** knowledge search.
-      *(Today it triggers a vector scan and can escalate — this is L1 dying.)*
-- [ ] Test: a follow-up turn resolves against prior context.
-      *(Today structurally impossible — this is L2 dying.)*
-- [ ] Test: cross-tenant tool argument is ignored, not honoured (**G1**).
-- [ ] Test: budget exhaustion degrades to a final answer or handoff, never hangs.
-- [ ] `tests/test_retrieval.py` still passes unchanged.
+### 1.7 Prove it ✅ done — `tests/test_orchestration.py`
+- [x] A greeting produces **no** knowledge search (`GreetingTests`).
+- [x] A follow-up turn resolves against prior context (`FollowUpTests`).
+- [x] Cross-tenant tool argument is ignored, not honoured (`TenancyTests`).
+- [x] Budget exhaustion degrades to a final answer or handoff (`BudgetTests`).
+- [x] `tests/test_retrieval.py` still passes unchanged.
+
+### Carried forward from Phase 1 (not blockers for Phase 2)
+- Turns still run inside the consumer process via `sync_to_async`; moving them
+  to a worker and streaming tokens are the Cross-cutting tasks below.
+- No live Gemini call is exercised by the test suite (the model is a scripted
+  fake). Smoke-test the widget against a real `GEMINI_API_KEY` after deploy.
+- `summary` / `working_set` are replayed but never written.
 
 ---
 

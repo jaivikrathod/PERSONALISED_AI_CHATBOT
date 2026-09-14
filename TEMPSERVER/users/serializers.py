@@ -127,5 +127,11 @@ class RegistrationSerializer(serializers.Serializer):
         admin.set_password(raw_password)
         admin.save()
 
+        # B0 step 2. Without a bot the orchestrator has nothing to run, so the
+        # new company's widget would hand every message straight to a human.
+        from registry.presets import provision_chatbot
+
+        provision_chatbot(company)
+
         return company, admin
 

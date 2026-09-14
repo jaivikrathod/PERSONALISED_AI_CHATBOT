@@ -57,6 +57,8 @@ INSTALLED_APPS = [
     'rest_framework',
     'corsheaders',
     'chat',
+    'registry',
+    'orchestration',
 ]
 
 MIDDLEWARE = [
@@ -231,6 +233,15 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # answer using only those as context.
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+
+# Which `orchestration.providers` implementation runs the turn loop (D4).
+CHAT_PROVIDER = os.getenv("CHAT_PROVIDER", "gemini")
+
+# Run each tool executor in a worker thread so `single_tool_timeout_ms` can
+# actually abandon a hung call (B5). Tests turn this off: a separate thread
+# opens its own DB connection and cannot see a TestCase transaction.
+ORCHESTRATION_TOOL_THREADS = True
+
 # Retrieval floor: below this cosine score the best FAQ match is not even shown
 # to the LLM, and the chat is handed to a human agent.
 #
@@ -245,10 +256,11 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 # This was 0.90 - far above anything the model produces for a paraphrase - so
 # essentially every rephrased question escalated to a human.
 #
-# Treat this as a cheap pre-filter, not the decision: `generate_answer` returns
-# `is_answer_found`, and that second, LLM-side judgement is what decides whether
-# the FAQ context actually answers the question. Erring low here is therefore
-# the safe direction.
+# Since Phase 1 the live gate is `accept_threshold` in `chatbots.policy`
+# (registry.models.default_policy, pinned to this value by test_registry.py);
+# this setting remains the measured reference the calibration tests check.
+# Treat it as a cheap pre-filter, not the decision: the model still judges
+# whether the returned passages answer the question, so erring low is safe.
 DEFAULT_CHAT_CONFIDENCE_THRESHOLD = 0.40
 CHAT_CONFIDENCE_THRESHOLD = float(
     os.getenv("CHAT_CONFIDENCE_THRESHOLD", str(DEFAULT_CHAT_CONFIDENCE_THRESHOLD))
